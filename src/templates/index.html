@@ -12,9 +12,12 @@
 <body>
   <main class="page">
     <header class="hero">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        KatoPro
+      <div class="hero-top">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          KatoPro
+        </div>
+        <a class="docs-link" href="/docs" target="_blank" rel="noopener">API /docs</a>
       </div>
       <h1>Генерация ежемесячных отчётных книг</h1>
       <p class="lead">
@@ -209,48 +212,47 @@
                 <span id="btn-label">Сгенерировать Excel</span>
                 <span id="btn-spinner" class="spinner hidden" aria-hidden="true"></span>
               </button>
-              <a class="button btn-secondary" href="/docs" target="_blank" rel="noopener">API /docs</a>
             </div>
           </form>
 
           <div id="results" class="results hidden" aria-live="polite"></div>
         </section>
       </div>
-
-      <aside class="tips">
-        <div class="tip">
-          <h3>Как добавить точку</h3>
-          <ul>
-                <li><strong>Пакетная загрузка</strong> — выберите сразу несколько `.xlsx`;</li>
-                <li><strong>Импорт из data/</strong> — зарегистрировать все файлы, уже лежащие в папке;</li>
-                <li><strong>Файлы на диске</strong> — смотрите, скачивайте и удаляйте исходники и результаты;</li>
-                <li>при удалении файл сначала подтверждается и уходит в папку <code>trash/</code>;</li>
-                <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
-          </ul>
-        </div>
-
-        <div class="tip">
-          <h3>Что заполняется автоматически</h3>
-          <ul>
-            <li>даты с 1-го по последнее число месяца;</li>
-            <li>подсветка выходных и праздников РФ;</li>
-            <li>формулы выручки, остатка, сумм и средних;</li>
-            <li>ссылки на остаток и ТМ предыдущего месяца;</li>
-            <li>защита листа с открытыми ячейками для ввода.</li>
-          </ul>
-        </div>
-
-        <div class="tip warn">
-          <h3>Полезные подсказки</h3>
-          <ul>
-            <li>Генерируйте месяцы по порядку — так корректнее связки с предыдущим листом.</li>
-            <li>Список точек хранится в <code>data/points.yaml</code>.</li>
-            <li>Можно добавить сколько угодно точек — не только 13.</li>
-            <li>Если API праздников недоступен, используются основные федеральные праздники.</li>
-          </ul>
-        </div>
-      </aside>
     </div>
+
+    <aside class="tips">
+      <div class="tip">
+        <h3>Как добавить точку</h3>
+        <ul>
+          <li><strong>Пакетная загрузка</strong> — выберите сразу несколько `.xlsx`;</li>
+          <li><strong>Импорт из data/</strong> — зарегистрировать все файлы, уже лежащие в папке;</li>
+          <li><strong>Файлы на диске</strong> — смотрите, скачивайте и удаляйте исходники и результаты;</li>
+          <li>при удалении файл сначала подтверждается и уходит в папку <code>trash/</code>;</li>
+          <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
+        </ul>
+      </div>
+
+      <div class="tip">
+        <h3>Что заполняется автоматически</h3>
+        <ul>
+          <li>даты с 1-го по последнее число месяца;</li>
+          <li>подсветка выходных и праздников РФ;</li>
+          <li>формулы выручки, остатка, сумм и средних;</li>
+          <li>ссылки на остаток и ТМ предыдущего месяца;</li>
+          <li>защита листа с открытыми ячейками для ввода.</li>
+        </ul>
+      </div>
+
+      <div class="tip warn">
+        <h3>Полезные подсказки</h3>
+        <ul>
+          <li>Генерируйте месяцы по порядку — так корректнее связки с предыдущим листом.</li>
+          <li>Список точек хранится в <code>data/points.yaml</code>.</li>
+          <li>Можно добавить сколько угодно точек — не только 13.</li>
+          <li>Если API праздников недоступен, используются основные федеральные праздники.</li>
+        </ul>
+      </div>
+    </aside>
 
     <p class="footer" id="footer-count">
       KatoPro · локальный сервис генерации отчётов · точек: {{ points|length }}
