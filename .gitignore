@@ -7,6 +7,8 @@ __pycache__/
 venv/
 logs/*
 !logs/.gitkeep
+data/*
+!data/.gitkeep
 generated/*
 !generated/.gitkeep
 trash/*
@@ -14,6 +16,5 @@ trash/*
 !trash/data/.gitkeep
 !trash/generated/.gitkeep
 *.xlsx
-!data/*.xlsx
 .idea/
 .vscode/
