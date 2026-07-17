@@ -47,6 +47,22 @@ class PointInfo(BaseModel):
     filename: Optional[str] = None
 
 
+class UploadItemResult(BaseModel):
+    filename: str
+    status: str  # ok | error
+    name: Optional[str] = None
+    message: Optional[str] = None
+    point: Optional[PointInfo] = None
+
+
+class UploadBatchResponse(BaseModel):
+    status: str  # ok | partial_error | error
+    total: int
+    succeeded: int
+    failed: int
+    results: list[UploadItemResult]
+
+
 class AddPointManualRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80, description="Название торговой точки")
     filename: str = Field(

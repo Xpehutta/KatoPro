@@ -515,6 +515,33 @@ button,
   padding: 0.75rem 0.9rem;
   border-radius: 12px;
   font-size: 0.92rem;
+  white-space: pre-line;
+}
+
+.file-preview {
+  border: 1px dashed #c7d8cf;
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  background: #fff;
+  font-size: 0.88rem;
+  color: var(--ink);
+  max-height: 140px;
+  overflow: auto;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.file-preview.empty {
+  color: var(--muted);
+}
+
+.actions.tight {
+  margin-top: 0.25rem;
+}
+
+.actions.tight .btn-primary,
+.actions.tight .btn-secondary {
+  padding: 0.7rem 1rem;
 }
 
 .inline-msg.ok {
@@ -529,10 +556,88 @@ button,
   color: var(--err);
 }
 
-.bad {
-  color: var(--err);
-  font-weight: 700;
+.storage-tabs {
+  display: flex;
+  gap: 0.45rem;
+  margin: 0.85rem 0 0.7rem;
+  flex-wrap: wrap;
 }
+
+.storage-tab {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.storage-tab.active {
+  background: var(--brand-soft);
+  border-color: #b7dcc9;
+  color: var(--brand-dark);
+}
+
+.tab-count {
+  display: inline-flex;
+  min-width: 1.35rem;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(28, 42, 34, 0.08);
+  padding: 0.05rem 0.35rem;
+  font-size: 0.75rem;
+}
+
+.storage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.storage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.storage-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.storage-actions .btn-danger {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.storage-row .meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
+}
+
+.storage-panel h3 {
+  margin: 0;
+}
+
 
 input[type="text"],
 input[type="file"] {

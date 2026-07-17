@@ -28,54 +28,108 @@
         <section class="panel">
           <h2>1. Торговые точки</h2>
           <p class="panel-note">
-            Добавьте точки загрузкой Excel или вручную из файлов в папке <code>data/</code>.
-            Список сохраняется автоматически и доступен при следующей генерации.
+            Добавьте точки загрузкой Excel. Список точек и файлы можно просмотреть ниже —
+            исходники в <code>data/</code>, результаты в <code>generated/</code>.
           </p>
 
           <div class="manage-grid">
             <form id="upload-form" class="subpanel">
-              <h3>Загрузить файл</h3>
-              <p class="hint">Подходит файл вида <code>МесОтч202603_Берёзка.xlsx</code> — имя точки можно взять из файла.</p>
+              <h3>Загрузить файлы</h3>
+              <p class="hint">
+                Можно выбрать сразу несколько `.xlsx`. Для пакета имена точек берутся из файлов:
+                <code>МесОтч202603_Берёзка.xlsx</code> → «Берёзка».
+              </p>
               <label>
                 Название точки
-                <span class="hint">Можно оставить пустым, если имя есть в имени файла</span>
+                <span class="hint">Только если загружаете <strong>один</strong> файл без имени в названии</span>
                 <input id="upload-name" type="text" placeholder="Например, Берёзка" maxlength="80" />
               </label>
               <label>
-                Excel-файл (.xlsx)
-                <input id="upload-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+                Excel-файлы (.xlsx)
+                <input
+                  id="upload-file"
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  multiple
+                  required
+                />
               </label>
+              <div id="upload-file-list" class="file-preview empty">Файлы не выбраны</div>
               <label class="check-inline">
                 <input id="upload-replace" type="checkbox" />
                 Заменить, если точка с таким именем уже есть
               </label>
-              <button type="submit" class="btn-primary" id="upload-btn">Добавить из файла</button>
+              <div class="actions tight">
+                <button type="submit" class="btn-primary" id="upload-btn">Загрузить выбранные</button>
+                <button type="button" class="btn-secondary" id="import-data-btn">Импорт всех из data/</button>
+              </div>
             </form>
 
-            <form id="manual-form" class="subpanel">
-              <h3>Добавить вручную</h3>
-              <p class="hint">Выберите уже лежащий в <code>data/</code> файл и задайте название точки.</p>
-              <label>
-                Название точки
-                <input id="manual-name" type="text" placeholder="Например, Центральный" maxlength="80" required />
-              </label>
-              <label>
-                Файл из data/
-                <select id="manual-file" required>
-                  <option value="">— выберите файл —</option>
-                  {% for file in data_files %}
-                  <option value="{{ file.filename }}" data-suggested="{{ file.suggested_name or '' }}">
-                    {{ file.filename }}{% if file.suggested_name %} → {{ file.suggested_name }}{% endif %}
-                  </option>
+            <div class="subpanel storage-panel">
+              <div class="points-head">
+                <div>
+                  <h3>Файлы на диске</h3>
+                  <p class="hint">Исходные книги и уже сгенерированные отчёты</p>
+                </div>
+                <button type="button" class="btn-secondary" id="refresh-storage-btn">Обновить</button>
+              </div>
+
+              <div class="storage-tabs" role="tablist">
+                <button type="button" class="storage-tab active" data-tab="data" id="tab-data">
+                  Исходные (data/)
+                  <span class="tab-count" id="count-data">{{ storage.data|length }}</span>
+                </button>
+                <button type="button" class="storage-tab" data-tab="generated" id="tab-generated">
+                  Сгенерированные
+                  <span class="tab-count" id="count-generated">{{ storage.generated|length }}</span>
+                </button>
+              </div>
+
+              <ul class="storage-list" id="storage-list-data">
+                {% if storage.data %}
+                  {% for file in storage.data %}
+                  <li class="storage-row">
+                    <div>
+                      <strong>{{ file.name }}</strong>
+                      <div class="meta">
+                        {% if file.linked_point %}точка: {{ file.linked_point }} · {% endif %}
+                        {{ (file.size / 1024)|round(1) }} КБ
+                        {% if file.modified %} · {{ file.modified.replace('T', ' ') }}{% endif %}
+                      </div>
+                    </div>
+                    <div class="storage-actions">
+                      <a class="button btn-secondary" href="/download/data/{{ file.name }}">Скачать</a>
+                      <button type="button" class="btn-danger" data-delete-file="data" data-filename="{{ file.name }}"{% if file.linked_point %} data-linked="{{ file.linked_point }}"{% endif %}>Удалить</button>
+                    </div>
+                  </li>
                   {% endfor %}
-                </select>
-              </label>
-              <label class="check-inline">
-                <input id="manual-replace" type="checkbox" />
-                Заменить, если точка с таким именем уже есть
-              </label>
-              <button type="submit" class="btn-secondary" id="manual-btn">Привязать файл</button>
-            </form>
+                {% else %}
+                  <li class="empty">В data/ пока нет Excel-файлов.</li>
+                {% endif %}
+              </ul>
+
+              <ul class="storage-list hidden" id="storage-list-generated">
+                {% if storage.generated %}
+                  {% for file in storage.generated %}
+                  <li class="storage-row">
+                    <div>
+                      <strong>{{ file.name }}</strong>
+                      <div class="meta">
+                        {{ (file.size / 1024)|round(1) }} КБ
+                        {% if file.modified %} · {{ file.modified.replace('T', ' ') }}{% endif %}
+                      </div>
+                    </div>
+                    <div class="storage-actions">
+                      <a class="button btn-secondary" href="/download/generated/{{ file.name }}">Скачать</a>
+                      <button type="button" class="btn-danger" data-delete-file="generated" data-filename="{{ file.name }}">Удалить</button>
+                    </div>
+                  </li>
+                  {% endfor %}
+                {% else %}
+                  <li class="empty">В generated/ пока нет файлов.</li>
+                {% endif %}
+              </ul>
+            </div>
           </div>
 
           <div id="points-manage-msg" class="inline-msg hidden" role="status"></div>
@@ -159,23 +213,6 @@
           </form>
 
           <div id="results" class="results hidden" aria-live="polite"></div>
-
-          <div class="files">
-            <h2>Недавно созданные файлы</h2>
-            <p class="panel-note">Файлы сохраняются в папку <code>generated/</code>. Скачайте нужный отчёт по ссылке.</p>
-            <ul class="files-list" id="files-list">
-              {% if files %}
-                {% for file in files %}
-                <li class="file-row">
-                  <span title="{{ file.name }}">{{ file.name }}</span>
-                  <a class="button btn-secondary" href="/download/{{ file.name }}">Скачать</a>
-                </li>
-                {% endfor %}
-              {% else %}
-                <li class="empty">Пока нет сгенерированных файлов.</li>
-              {% endif %}
-            </ul>
-          </div>
         </section>
       </div>
 
@@ -183,9 +220,10 @@
         <div class="tip">
           <h3>Как добавить точку</h3>
           <ul>
-            <li><strong>Загрузка</strong> — выберите .xlsx с историей месяцев;</li>
-            <li><strong>Вручную</strong> — если файл уже лежит в <code>data/</code>;</li>
-            <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
+                <li><strong>Пакетная загрузка</strong> — выберите сразу несколько `.xlsx`;</li>
+                <li><strong>Импорт из data/</strong> — зарегистрировать все файлы, уже лежащие в папке;</li>
+                <li><strong>Файлы на диске</strong> — смотрите и скачивайте исходники и результаты;</li>
+                <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
           </ul>
         </div>
 
@@ -223,15 +261,12 @@
     const btnLabel = document.getElementById("btn-label");
     const btnSpinner = document.getElementById("btn-spinner");
     const results = document.getElementById("results");
-    const filesList = document.getElementById("files-list");
     const toggleAll = document.getElementById("toggle-all");
     const pointsList = document.getElementById("points-list");
     const pointsManageList = document.getElementById("points-manage-list");
     const pointsCount = document.getElementById("points-count");
     const footerCount = document.getElementById("footer-count");
     const pointsMsg = document.getElementById("points-manage-msg");
-    const manualFile = document.getElementById("manual-file");
-    const manualName = document.getElementById("manual-name");
     const statusLabels = {
       ok: "успешно",
       error: "ошибка",
@@ -250,6 +285,16 @@
       pointsMsg.textContent = text;
       pointsMsg.className = `inline-msg ${kind}`;
       pointsMsg.classList.remove("hidden");
+    }
+
+    function formatSize(bytes) {
+      if (!bytes && bytes !== 0) return "—";
+      return `${(bytes / 1024).toFixed(1)} КБ`;
+    }
+
+    function formatModified(iso) {
+      if (!iso) return "";
+      return ` · ${iso.replace("T", " ")}`;
     }
 
     function selectedPoints() {
@@ -300,6 +345,49 @@
         .join("");
     }
 
+    function renderStorageList(kind, files) {
+      const list = document.getElementById(`storage-list-${kind}`);
+      const count = document.getElementById(`count-${kind}`);
+      count.textContent = String(files.length);
+      if (!files.length) {
+        const emptyText =
+          kind === "data"
+            ? "В data/ пока нет Excel-файлов."
+            : "В generated/ пока нет файлов.";
+        list.innerHTML = `<li class="empty">${emptyText}</li>`;
+        return;
+      }
+      list.innerHTML = files
+        .map((file) => {
+          const linked =
+            kind === "data" && file.linked_point
+              ? `точка: ${escapeHtml(file.linked_point)} · `
+              : "";
+          const linkedAttr =
+            kind === "data" && file.linked_point
+              ? ` data-linked="${escapeHtml(file.linked_point)}"`
+              : "";
+          return `
+            <li class="storage-row">
+              <div>
+                <strong>${escapeHtml(file.name)}</strong>
+                <div class="meta">${linked}${formatSize(file.size)}${formatModified(
+                  file.modified
+                )}</div>
+              </div>
+              <div class="storage-actions">
+                <a class="button btn-secondary" href="/download/${kind}/${encodeURIComponent(
+                  file.name
+                )}">Скачать</a>
+                <button type="button" class="btn-danger" data-delete-file="${kind}" data-filename="${escapeHtml(
+                  file.name
+                )}"${linkedAttr}>Удалить</button>
+              </div>
+            </li>`;
+        })
+        .join("");
+    }
+
     async function refreshPoints() {
       const response = await fetch("/api/points");
       if (!response.ok) return;
@@ -307,33 +395,23 @@
       renderPoints(points);
     }
 
-    async function refreshDataFiles() {
-      const response = await fetch("/api/data-files");
+    async function refreshStorage() {
+      const response = await fetch("/api/storage");
       if (!response.ok) return;
-      const files = await response.json();
-      const current = manualFile.value;
-      manualFile.innerHTML =
-        `<option value="">— выберите файл —</option>` +
-        files
-          .map((file) => {
-            const label = file.suggested_name
-              ? `${file.filename} → ${file.suggested_name}`
-              : file.filename;
-            return `<option value="${escapeHtml(file.filename)}" data-suggested="${escapeHtml(
-              file.suggested_name || ""
-            )}">${escapeHtml(label)}</option>`;
-          })
-          .join("");
-      if (current) manualFile.value = current;
+      const storage = await response.json();
+      renderStorageList("data", storage.data || []);
+      renderStorageList("generated", storage.generated || []);
     }
 
     function renderResults(payload) {
       const items = (payload.results || [])
         .map((item) => {
           const badge = item.status === "ok" ? "ok" : "error";
+          const filename =
+            item.output_file && item.output_file.split(/[\\/]/).pop();
           const download =
-            item.status === "ok" && item.output_file
-              ? `<div><a href="/download/${encodeURIComponent(item.output_file.split(/[\\\\/]/).pop())}">Скачать файл</a></div>`
+            item.status === "ok" && filename
+              ? `<div><a href="/download/generated/${encodeURIComponent(filename)}">Скачать файл</a></div>`
               : "";
           return `
             <li class="result-item">
@@ -358,35 +436,22 @@
       results.classList.remove("hidden");
     }
 
-    async function refreshFiles() {
-      try {
-        const response = await fetch("/api/files");
-        if (!response.ok) return;
-        const files = await response.json();
-        if (!files.length) {
-          filesList.innerHTML = `<li class="empty">Пока нет сгенерированных файлов.</li>`;
-          return;
-        }
-        filesList.innerHTML = files
-          .map(
-            (file) => `
-            <li class="file-row">
-              <span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
-              <a class="button btn-secondary" href="/download/${encodeURIComponent(file.name)}">Скачать</a>
-            </li>`
-          )
-          .join("");
-      } catch (err) {
-        // ignore refresh errors in UI
-      }
-    }
-
     function parseError(payload) {
       const detail = payload.detail;
       if (Array.isArray(detail)) {
         return detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
       }
       return detail || "Операция не выполнена";
+    }
+
+    function switchStorageTab(tab) {
+      document.querySelectorAll(".storage-tab").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === tab);
+      });
+      document.getElementById("storage-list-data").classList.toggle("hidden", tab !== "data");
+      document
+        .getElementById("storage-list-generated")
+        .classList.toggle("hidden", tab !== "generated");
     }
 
     toggleAll?.addEventListener("click", () => {
@@ -399,23 +464,99 @@
       toggleAll.textContent = allChecked ? "Выбрать все" : "Снять все";
     });
 
-    manualFile?.addEventListener("change", () => {
-      const option = manualFile.selectedOptions[0];
-      const suggested = option?.dataset?.suggested || "";
-      if (suggested && !manualName.value.trim()) {
-        manualName.value = suggested;
+    document.querySelectorAll(".storage-tab").forEach((btn) => {
+      btn.addEventListener("click", () => switchStorageTab(btn.dataset.tab));
+    });
+
+    document.getElementById("refresh-storage-btn").addEventListener("click", async () => {
+      await refreshStorage();
+    });
+
+    async function deleteStorageFile(kind, filename, linkedPoint) {
+      let message = `Удалить файл «${filename}» из ${kind}/?`;
+      if (kind === "data" && linkedPoint) {
+        message += `\n\nТочка «${linkedPoint}» будет убрана из списка.`;
+      }
+      if (!confirm(message)) return;
+
+      const response = await fetch(
+        `/api/storage/${kind}/${encodeURIComponent(filename)}`,
+        { method: "DELETE" }
+      );
+      const payload = await response.json();
+      if (!response.ok) throw new Error(parseError(payload));
+
+      const unlinked = (payload.unlinked_points || []).join(", ");
+      showPointsMsg(
+        unlinked
+          ? `Файл «${filename}» удалён. Отвязаны точки: ${unlinked}`
+          : `Файл «${filename}» удалён`,
+        "ok"
+      );
+      await refreshStorage();
+      if (kind === "data") {
+        await refreshPoints();
+      }
+    }
+
+    document.querySelector(".storage-panel").addEventListener("click", async (event) => {
+      const btn = event.target.closest("[data-delete-file]");
+      if (!btn) return;
+      const kind = btn.getAttribute("data-delete-file");
+      const filename = btn.getAttribute("data-filename");
+      const linked = btn.getAttribute("data-linked");
+      btn.disabled = true;
+      try {
+        await deleteStorageFile(kind, filename, linked);
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      } finally {
+        btn.disabled = false;
       }
     });
+
+    document.getElementById("upload-file").addEventListener("change", (event) => {
+      const list = document.getElementById("upload-file-list");
+      const files = Array.from(event.target.files || []);
+      if (!files.length) {
+        list.className = "file-preview empty";
+        list.textContent = "Файлы не выбраны";
+        return;
+      }
+      list.className = "file-preview";
+      list.innerHTML = files
+        .map((file) => `<div>${escapeHtml(file.name)}</div>`)
+        .join("");
+    });
+
+    function summarizeBatch(payload) {
+      if (!payload.total) {
+        return "Новых файлов для импорта не найдено";
+      }
+      const lines = (payload.results || []).map((item) => {
+        const mark = item.status === "ok" ? "✓" : "✗";
+        return `${mark} ${item.filename}${item.name ? ` → ${item.name}` : ""}${
+          item.message ? `: ${item.message}` : ""
+        }`;
+      });
+      return (
+        `Готово: успешно ${payload.succeeded} из ${payload.total}` +
+        (payload.failed ? `, ошибок: ${payload.failed}` : "") +
+        "\n" +
+        lines.join("\n")
+      );
+    }
 
     document.getElementById("upload-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const fileInput = document.getElementById("upload-file");
-      if (!fileInput.files.length) {
-        showPointsMsg("Выберите Excel-файл", "error");
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) {
+        showPointsMsg("Выберите один или несколько Excel-файлов", "error");
         return;
       }
       const data = new FormData();
-      data.append("file", fileInput.files[0]);
+      files.forEach((file) => data.append("files", file));
       const name = document.getElementById("upload-name").value.trim();
       if (name) data.append("name", name);
       data.append("replace", document.getElementById("upload-replace").checked ? "true" : "false");
@@ -426,11 +567,15 @@
         const response = await fetch("/api/points/upload", { method: "POST", body: data });
         const payload = await response.json();
         if (!response.ok) throw new Error(parseError(payload));
-        showPointsMsg(`Точка «${payload.name}» добавлена`, "ok");
+        const kind = payload.status === "error" ? "error" : "ok";
+        showPointsMsg(summarizeBatch(payload), kind);
         fileInput.value = "";
         document.getElementById("upload-name").value = "";
+        document.getElementById("upload-file-list").className = "file-preview empty";
+        document.getElementById("upload-file-list").textContent = "Файлы не выбраны";
         await refreshPoints();
-        await refreshDataFiles();
+        await refreshStorage();
+        switchStorageTab("data");
       } catch (err) {
         showPointsMsg(err.message || err, "error");
       } finally {
@@ -438,24 +583,21 @@
       }
     });
 
-    document.getElementById("manual-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const btn = document.getElementById("manual-btn");
+    document.getElementById("import-data-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("import-data-btn");
+      const replace = document.getElementById("upload-replace").checked;
       btn.disabled = true;
       try {
-        const response = await fetch("/api/points/manual", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: manualName.value.trim(),
-            filename: manualFile.value,
-            replace: document.getElementById("manual-replace").checked,
-          }),
-        });
+        const response = await fetch(
+          `/api/points/import-data?replace=${replace ? "true" : "false"}`,
+          { method: "POST" }
+        );
         const payload = await response.json();
         if (!response.ok) throw new Error(parseError(payload));
-        showPointsMsg(`Точка «${payload.name}» привязана к файлу`, "ok");
+        const kind = payload.status === "error" ? "error" : "ok";
+        showPointsMsg(summarizeBatch(payload), kind);
         await refreshPoints();
+        await refreshStorage();
       } catch (err) {
         showPointsMsg(err.message || err, "error");
       } finally {
@@ -476,6 +618,7 @@
         if (!response.ok) throw new Error(parseError(payload));
         showPointsMsg(`Точка «${name}» удалена из списка`, "ok");
         await refreshPoints();
+        await refreshStorage();
       } catch (err) {
         showPointsMsg(err.message || err, "error");
       }
@@ -502,7 +645,8 @@
         const payload = await response.json();
         if (!response.ok) throw new Error(parseError(payload));
         renderResults(payload);
-        await refreshFiles();
+        await refreshStorage();
+        switchStorageTab("generated");
       } catch (err) {
         results.className = "results result-card error";
         results.innerHTML = `<h3>Ошибка</h3><p>${escapeHtml(err.message || err)}</p>`;

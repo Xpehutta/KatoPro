@@ -94,10 +94,11 @@ KatoPro/
 | `GET` | `/health` | Проверка работоспособности |
 | `POST` | `/generate` | Генерация отчётов |
 | `GET` | `/api/points` | Список точек |
-| `POST` | `/api/points/upload` | Добавить точку (загрузка файла) |
-| `POST` | `/api/points/manual` | Добавить точку (файл уже в `data/`) |
-| `DELETE` | `/api/points/{name}` | Удалить точку из списка |
-| `GET` | `/download/{filename}` | Скачать файл из `generated/` |
+| `GET` | `/api/storage` | Список файлов в `data/` и `generated/` |
+| `DELETE` | `/api/storage/{kind}/{filename}` | Удалить файл (`kind`: `data` или `generated`) |
+| `GET` | `/download/{kind}/{filename}` | Скачать файл (`kind`: `data` или `generated`) |
+| `POST` | `/api/points/upload` | Добавить точки (один или несколько файлов) |
+| `POST` | `/api/points/import-data` | Зарегистрировать все Excel из `data/` |
 
 Пример генерации:
 
