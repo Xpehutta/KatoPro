@@ -1,0 +1,16 @@
+services:
+  katopro:
+    build: .
+    container_name: katopro
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./generated:/app/generated
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - LOG_DIR=/app/logs
+      - HOLIDAYS_CACHE_DIR=/app/logs/holidays_cache
+    restart: unless-stopped

@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+logs/*
+!logs/.gitkeep
+generated/*
+!generated/.gitkeep
+*.xlsx
+!data/*.xlsx
+.idea/
+.vscode/

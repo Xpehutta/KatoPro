@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KatoPro — генерация отчётов</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        KatoPro
+      </div>
+      <h1>Генерация ежемесячных отчётных книг</h1>
+      <p class="lead">
+        Создайте чистый лист Excel на новый месяц: даты, выходные и праздники РФ,
+        формулы и защита ячеек — по шаблону предыдущего месяца.
+      </p>
+    </header>
+
+    <div class="layout">
+      <div class="main-column">
+        <section class="panel">
+          <h2>1. Торговые точки</h2>
+          <p class="panel-note">
+            Добавьте точки загрузкой Excel или вручную из файлов в папке <code>data/</code>.
+            Список сохраняется автоматически и доступен при следующей генерации.
+          </p>
+
+          <div class="manage-grid">
+            <form id="upload-form" class="subpanel">
+              <h3>Загрузить файл</h3>
+              <p class="hint">Подходит файл вида <code>МесОтч202603_Берёзка.xlsx</code> — имя точки можно взять из файла.</p>
+              <label>
+                Название точки
+                <span class="hint">Можно оставить пустым, если имя есть в имени файла</span>
+                <input id="upload-name" type="text" placeholder="Например, Берёзка" maxlength="80" />
+              </label>
+              <label>
+                Excel-файл (.xlsx)
+                <input id="upload-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+              </label>
+              <label class="check-inline">
+                <input id="upload-replace" type="checkbox" />
+                Заменить, если точка с таким именем уже есть
+              </label>
+              <button type="submit" class="btn-primary" id="upload-btn">Добавить из файла</button>
+            </form>
+
+            <form id="manual-form" class="subpanel">
+              <h3>Добавить вручную</h3>
+              <p class="hint">Выберите уже лежащий в <code>data/</code> файл и задайте название точки.</p>
+              <label>
+                Название точки
+                <input id="manual-name" type="text" placeholder="Например, Центральный" maxlength="80" required />
+              </label>
+              <label>
+                Файл из data/
+                <select id="manual-file" required>
+                  <option value="">— выберите файл —</option>
+                  {% for file in data_files %}
+                  <option value="{{ file.filename }}" data-suggested="{{ file.suggested_name or '' }}">
+                    {{ file.filename }}{% if file.suggested_name %} → {{ file.suggested_name }}{% endif %}
+                  </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="check-inline">
+                <input id="manual-replace" type="checkbox" />
+                Заменить, если точка с таким именем уже есть
+              </label>
+              <button type="submit" class="btn-secondary" id="manual-btn">Привязать файл</button>
+            </form>
+          </div>
+
+          <div id="points-manage-msg" class="inline-msg hidden" role="status"></div>
+
+          <div class="points-manage">
+            <div class="points-head">
+              <strong>Список точек</strong>
+              <span class="hint" id="points-count">{{ points|length }} шт.</span>
+            </div>
+            <ul class="points-manage-list" id="points-manage-list">
+              {% if points %}
+                {% for point in points %}
+                <li class="point-manage-row" data-name="{{ point.name }}">
+                  <div>
+                    <strong>{{ point.name }}</strong>
+                    <div class="meta">{{ point.filename or point.file_path }}{% if not point.file_exists %} · <span class="bad">файл не найден</span>{% endif %}</div>
+                  </div>
+                  <button type="button" class="btn-danger" data-remove="{{ point.name }}">Удалить</button>
+                </li>
+                {% endfor %}
+              {% else %}
+                <li class="empty">Пока нет точек — загрузите первый Excel выше.</li>
+              {% endif %}
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>2. Параметры генерации</h2>
+          <p class="panel-note">
+            Укажите месяц и точки. Если точки не выбраны — будут обработаны все из списка.
+          </p>
+
+          <form id="generate-form">
+            <div class="form-grid">
+              <label>
+                Год
+                <span class="hint">Обычно текущий или следующий отчётный год</span>
+                <input id="year" name="year" type="number" min="2000" max="2100" required value="{{ default_year }}" />
+              </label>
+              <label>
+                Месяц
+                <span class="hint">Будет создан лист вида «Май26»</span>
+                <select id="month" name="month" required>
+                  {% for num, name in months %}
+                  <option value="{{ num }}" {% if num == default_month %}selected{% endif %}>{{ name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+
+            <div class="points-box">
+              <div class="points-head">
+                <div>
+                  <strong>Какие точки генерировать</strong>
+                  <div class="hint">Можно выбрать несколько или оставить пустым для всех</div>
+                </div>
+                <button type="button" class="btn-secondary" id="toggle-all">Выбрать все</button>
+              </div>
+              <div class="points-list" id="points-list">
+                {% if points %}
+                  {% for point in points %}
+                  <label class="point-item">
+                    <input type="checkbox" name="points" value="{{ point.name }}" />
+                    <span>{{ point.name }}</span>
+                  </label>
+                  {% endfor %}
+                {% else %}
+                  <p class="empty">Сначала добавьте хотя бы одну торговую точку.</p>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="actions">
+              <button type="submit" class="btn-primary" id="submit-btn">
+                <span id="btn-label">Сгенерировать Excel</span>
+                <span id="btn-spinner" class="spinner hidden" aria-hidden="true"></span>
+              </button>
+              <a class="button btn-secondary" href="/docs" target="_blank" rel="noopener">API /docs</a>
+            </div>
+          </form>
+
+          <div id="results" class="results hidden" aria-live="polite"></div>
+
+          <div class="files">
+            <h2>Недавно созданные файлы</h2>
+            <p class="panel-note">Файлы сохраняются в папку <code>generated/</code>. Скачайте нужный отчёт по ссылке.</p>
+            <ul class="files-list" id="files-list">
+              {% if files %}
+                {% for file in files %}
+                <li class="file-row">
+                  <span title="{{ file.name }}">{{ file.name }}</span>
+                  <a class="button btn-secondary" href="/download/{{ file.name }}">Скачать</a>
+                </li>
+                {% endfor %}
+              {% else %}
+                <li class="empty">Пока нет сгенерированных файлов.</li>
+              {% endif %}
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <aside class="tips">
+        <div class="tip">
+          <h3>Как добавить точку</h3>
+          <ul>
+            <li><strong>Загрузка</strong> — выберите .xlsx с историей месяцев;</li>
+            <li><strong>Вручную</strong> — если файл уже лежит в <code>data/</code>;</li>
+            <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
+          </ul>
+        </div>
+
+        <div class="tip">
+          <h3>Что заполняется автоматически</h3>
+          <ul>
+            <li>даты с 1-го по последнее число месяца;</li>
+            <li>подсветка выходных и праздников РФ;</li>
+            <li>формулы выручки, остатка, сумм и средних;</li>
+            <li>ссылки на остаток и ТМ предыдущего месяца;</li>
+            <li>защита листа с открытыми ячейками для ввода.</li>
+          </ul>
+        </div>
+
+        <div class="tip warn">
+          <h3>Полезные подсказки</h3>
+          <ul>
+            <li>Генерируйте месяцы по порядку — так корректнее связки с предыдущим листом.</li>
+            <li>Список точек хранится в <code>data/points.yaml</code>.</li>
+            <li>Можно добавить сколько угодно точек — не только 13.</li>
+            <li>Если API праздников недоступен, используются основные федеральные праздники.</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <p class="footer" id="footer-count">
+      KatoPro · локальный сервис генерации отчётов · точек: {{ points|length }}
+    </p>
+  </main>
+
+  <script>
+    const form = document.getElementById("generate-form");
+    const submitBtn = document.getElementById("submit-btn");
+    const btnLabel = document.getElementById("btn-label");
+    const btnSpinner = document.getElementById("btn-spinner");
+    const results = document.getElementById("results");
+    const filesList = document.getElementById("files-list");
+    const toggleAll = document.getElementById("toggle-all");
+    const pointsList = document.getElementById("points-list");
+    const pointsManageList = document.getElementById("points-manage-list");
+    const pointsCount = document.getElementById("points-count");
+    const footerCount = document.getElementById("footer-count");
+    const pointsMsg = document.getElementById("points-manage-msg");
+    const manualFile = document.getElementById("manual-file");
+    const manualName = document.getElementById("manual-name");
+    const statusLabels = {
+      ok: "успешно",
+      error: "ошибка",
+      partial_error: "частично",
+    };
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function showPointsMsg(text, kind) {
+      pointsMsg.textContent = text;
+      pointsMsg.className = `inline-msg ${kind}`;
+      pointsMsg.classList.remove("hidden");
+    }
+
+    function selectedPoints() {
+      return Array.from(document.querySelectorAll('input[name="points"]:checked')).map(
+        (el) => el.value
+      );
+    }
+
+    function setLoading(isLoading) {
+      submitBtn.disabled = isLoading;
+      btnSpinner.classList.toggle("hidden", !isLoading);
+      btnLabel.textContent = isLoading ? "Генерируем…" : "Сгенерировать Excel";
+    }
+
+    function renderPoints(points) {
+      pointsCount.textContent = `${points.length} шт.`;
+      footerCount.textContent = `KatoPro · локальный сервис генерации отчётов · точек: ${points.length}`;
+
+      if (!points.length) {
+        pointsList.innerHTML = `<p class="empty">Сначала добавьте хотя бы одну торговую точку.</p>`;
+        pointsManageList.innerHTML = `<li class="empty">Пока нет точек — загрузите первый Excel выше.</li>`;
+        return;
+      }
+
+      pointsList.innerHTML = points
+        .map(
+          (point) => `
+          <label class="point-item">
+            <input type="checkbox" name="points" value="${escapeHtml(point.name)}" />
+            <span>${escapeHtml(point.name)}</span>
+          </label>`
+        )
+        .join("");
+
+      pointsManageList.innerHTML = points
+        .map(
+          (point) => `
+          <li class="point-manage-row" data-name="${escapeHtml(point.name)}">
+            <div>
+              <strong>${escapeHtml(point.name)}</strong>
+              <div class="meta">${escapeHtml(point.filename || point.file_path)}${
+                point.file_exists ? "" : ' · <span class="bad">файл не найден</span>'
+              }</div>
+            </div>
+            <button type="button" class="btn-danger" data-remove="${escapeHtml(point.name)}">Удалить</button>
+          </li>`
+        )
+        .join("");
+    }
+
+    async function refreshPoints() {
+      const response = await fetch("/api/points");
+      if (!response.ok) return;
+      const points = await response.json();
+      renderPoints(points);
+    }
+
+    async function refreshDataFiles() {
+      const response = await fetch("/api/data-files");
+      if (!response.ok) return;
+      const files = await response.json();
+      const current = manualFile.value;
+      manualFile.innerHTML =
+        `<option value="">— выберите файл —</option>` +
+        files
+          .map((file) => {
+            const label = file.suggested_name
+              ? `${file.filename} → ${file.suggested_name}`
+              : file.filename;
+            return `<option value="${escapeHtml(file.filename)}" data-suggested="${escapeHtml(
+              file.suggested_name || ""
+            )}">${escapeHtml(label)}</option>`;
+          })
+          .join("");
+      if (current) manualFile.value = current;
+    }
+
+    function renderResults(payload) {
+      const items = (payload.results || [])
+        .map((item) => {
+          const badge = item.status === "ok" ? "ok" : "error";
+          const download =
+            item.status === "ok" && item.output_file
+              ? `<div><a href="/download/${encodeURIComponent(item.output_file.split(/[\\\\/]/).pop())}">Скачать файл</a></div>`
+              : "";
+          return `
+            <li class="result-item">
+              <div><strong>${escapeHtml(item.name)}</strong> <span class="badge ${badge}">${
+                statusLabels[item.status] || item.status
+              }</span></div>
+              <div class="meta">Лист: ${escapeHtml(item.sheet_name || "—")} · ${escapeHtml(
+                item.message || ""
+              )}</div>
+              ${download}
+            </li>
+          `;
+        })
+        .join("");
+
+      results.className = `results result-card ${payload.status}`;
+      results.innerHTML = `
+        <h3>Результат: ${statusLabels[payload.status] || payload.status}</h3>
+        <div class="meta">Период: ${payload.month}.${payload.year}</div>
+        <ul class="result-list">${items}</ul>
+      `;
+      results.classList.remove("hidden");
+    }
+
+    async function refreshFiles() {
+      try {
+        const response = await fetch("/api/files");
+        if (!response.ok) return;
+        const files = await response.json();
+        if (!files.length) {
+          filesList.innerHTML = `<li class="empty">Пока нет сгенерированных файлов.</li>`;
+          return;
+        }
+        filesList.innerHTML = files
+          .map(
+            (file) => `
+            <li class="file-row">
+              <span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+              <a class="button btn-secondary" href="/download/${encodeURIComponent(file.name)}">Скачать</a>
+            </li>`
+          )
+          .join("");
+      } catch (err) {
+        // ignore refresh errors in UI
+      }
+    }
+
+    function parseError(payload) {
+      const detail = payload.detail;
+      if (Array.isArray(detail)) {
+        return detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
+      }
+      return detail || "Операция не выполнена";
+    }
+
+    toggleAll?.addEventListener("click", () => {
+      const boxes = Array.from(document.querySelectorAll('input[name="points"]'));
+      if (!boxes.length) return;
+      const allChecked = boxes.every((box) => box.checked);
+      boxes.forEach((box) => {
+        box.checked = !allChecked;
+      });
+      toggleAll.textContent = allChecked ? "Выбрать все" : "Снять все";
+    });
+
+    manualFile?.addEventListener("change", () => {
+      const option = manualFile.selectedOptions[0];
+      const suggested = option?.dataset?.suggested || "";
+      if (suggested && !manualName.value.trim()) {
+        manualName.value = suggested;
+      }
+    });
+
+    document.getElementById("upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fileInput = document.getElementById("upload-file");
+      if (!fileInput.files.length) {
+        showPointsMsg("Выберите Excel-файл", "error");
+        return;
+      }
+      const data = new FormData();
+      data.append("file", fileInput.files[0]);
+      const name = document.getElementById("upload-name").value.trim();
+      if (name) data.append("name", name);
+      data.append("replace", document.getElementById("upload-replace").checked ? "true" : "false");
+
+      const btn = document.getElementById("upload-btn");
+      btn.disabled = true;
+      try {
+        const response = await fetch("/api/points/upload", { method: "POST", body: data });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+        showPointsMsg(`Точка «${payload.name}» добавлена`, "ok");
+        fileInput.value = "";
+        document.getElementById("upload-name").value = "";
+        await refreshPoints();
+        await refreshDataFiles();
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("manual-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const btn = document.getElementById("manual-btn");
+      btn.disabled = true;
+      try {
+        const response = await fetch("/api/points/manual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: manualName.value.trim(),
+            filename: manualFile.value,
+            replace: document.getElementById("manual-replace").checked,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+        showPointsMsg(`Точка «${payload.name}» привязана к файлу`, "ok");
+        await refreshPoints();
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    pointsManageList.addEventListener("click", async (event) => {
+      const btn = event.target.closest("[data-remove]");
+      if (!btn) return;
+      const name = btn.getAttribute("data-remove");
+      if (!confirm(`Удалить точку «${name}» из списка? Файл в data/ останется.`)) return;
+      try {
+        const response = await fetch(`/api/points/${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+        showPointsMsg(`Точка «${name}» удалена из списка`, "ok");
+        await refreshPoints();
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      }
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const year = Number(document.getElementById("year").value);
+      const month = Number(document.getElementById("month").value);
+      const points = selectedPoints();
+
+      const body = { year, month };
+      if (points.length) body.points = points;
+
+      setLoading(true);
+      results.classList.add("hidden");
+
+      try {
+        const response = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+        renderResults(payload);
+        await refreshFiles();
+      } catch (err) {
+        results.className = "results result-card error";
+        results.innerHTML = `<h3>Ошибка</h3><p>${escapeHtml(err.message || err)}</p>`;
+        results.classList.remove("hidden");
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>

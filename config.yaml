@@ -1,0 +1,20 @@
+points:
+  - name: "Смола"
+    file_path: "./data/МесОтч202603_Смола.xlsx"
+    # Добавьте остальные торговые точки через веб-интерфейс
+    # или раскомментируйте и укажите путь к файлу:
+    # - name: "Берёзка"
+    #   file_path: "./data/МесОтч202603_Берёзка.xlsx"
+
+output_dir: "./generated"
+
+# Пароль защиты листа. null или пустая строка — без пароля (защита всё равно включается).
+protection_password: "secret"
+
+holidays_api:
+  # xmlcalendar.ru — надёжный источник производственного календаря РФ
+  url: "https://xmlcalendar.ru/data/ru/{year}/calendar.json"
+  # Запасной источник: isdayoff.ru (все нерабочие дни)
+  fallback_url: "https://isdayoff.ru/api/getdata?year={year}"
+  timeout_seconds: 10
+  cache_ttl_hours: 24
