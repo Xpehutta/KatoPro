@@ -57,7 +57,7 @@
               <div id="upload-file-list" class="file-preview empty">Файлы не выбраны</div>
               <label class="check-inline">
                 <input id="upload-replace" type="checkbox" />
-                Заменить, если точка с таким именем уже есть
+                Принудительно заменить даже на более старый файл
               </label>
               <div class="actions tight">
                 <button type="submit" class="btn-primary" id="upload-btn">Загрузить выбранные</button>
@@ -161,6 +161,7 @@
           <h2>2. Параметры генерации</h2>
           <p class="panel-note">
             Укажите месяц и точки. Если точки не выбраны — будут обработаны все из списка.
+            Если файл за этот период уже есть в <code>generated/</code>, приложение спросит подтверждение перед пересозданием.
           </p>
 
           <form id="generate-form">
@@ -222,7 +223,8 @@
           <ul>
                 <li><strong>Пакетная загрузка</strong> — выберите сразу несколько `.xlsx`;</li>
                 <li><strong>Импорт из data/</strong> — зарегистрировать все файлы, уже лежащие в папке;</li>
-                <li><strong>Файлы на диске</strong> — смотрите и скачивайте исходники и результаты;</li>
+                <li><strong>Файлы на диске</strong> — смотрите, скачивайте и удаляйте исходники и результаты;</li>
+                <li>при удалении файл сначала подтверждается и уходит в папку <code>trash/</code>;</li>
                 <li>имя можно взять из файла: <code>МесОтч202603_Смола.xlsx</code> → «Смола».</li>
           </ul>
         </div>
@@ -254,6 +256,19 @@
       KatoPro · локальный сервис генерации отчётов · точек: {{ points|length }}
     </p>
   </main>
+
+  <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-backdrop" data-confirm-cancel></div>
+    <div class="modal-card">
+      <h3 id="confirm-title">Подтверждение</h3>
+      <p id="confirm-message" class="modal-message"></p>
+      <p id="confirm-note" class="modal-note hidden"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" data-confirm-cancel>Отмена</button>
+        <button type="button" class="btn-danger" id="confirm-ok">Подтвердить</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const form = document.getElementById("generate-form");
@@ -441,6 +456,9 @@
       if (Array.isArray(detail)) {
         return detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
       }
+      if (detail && typeof detail === "object") {
+        return detail.message || JSON.stringify(detail);
+      }
       return detail || "Операция не выполнена";
     }
 
@@ -473,11 +491,17 @@
     });
 
     async function deleteStorageFile(kind, filename, linkedPoint) {
-      let message = `Удалить файл «${filename}» из ${kind}/?`;
+      let message = `Переместить файл «${filename}» из ${kind}/ в корзину?`;
       if (kind === "data" && linkedPoint) {
         message += `\n\nТочка «${linkedPoint}» будет убрана из списка.`;
       }
-      if (!confirm(message)) return;
+      const confirmed = await askConfirm(message, {
+        title: "Подтверждение удаления",
+        note: "Файл будет перемещён в папку trash/, а не удалён навсегда.",
+        okText: "Переместить в корзину",
+        okClass: "btn-danger",
+      });
+      if (!confirmed) return;
 
       const response = await fetch(
         `/api/storage/${kind}/${encodeURIComponent(filename)}`,
@@ -487,16 +511,68 @@
       if (!response.ok) throw new Error(parseError(payload));
 
       const unlinked = (payload.unlinked_points || []).join(", ");
+      const trashHint = payload.trash_path
+        ? `\nКорзина: ${payload.trash_path}`
+        : "";
       showPointsMsg(
-        unlinked
-          ? `Файл «${filename}» удалён. Отвязаны точки: ${unlinked}`
-          : `Файл «${filename}» удалён`,
+        (unlinked
+          ? `Файл «${filename}» перемещён в корзину. Отвязаны точки: ${unlinked}`
+          : `Файл «${filename}» перемещён в корзину`) + trashHint,
         "ok"
       );
       await refreshStorage();
       if (kind === "data") {
         await refreshPoints();
       }
+    }
+
+    function askConfirm(message, options = {}) {
+      const modal = document.getElementById("confirm-modal");
+      const titleEl = document.getElementById("confirm-title");
+      const messageEl = document.getElementById("confirm-message");
+      const noteEl = document.getElementById("confirm-note");
+      const okBtn = document.getElementById("confirm-ok");
+
+      titleEl.textContent = options.title || "Подтверждение";
+      messageEl.textContent = message;
+      if (options.note) {
+        noteEl.textContent = options.note;
+        noteEl.classList.remove("hidden");
+      } else {
+        noteEl.textContent = "";
+        noteEl.classList.add("hidden");
+      }
+      okBtn.textContent = options.okText || "Подтвердить";
+      okBtn.className = options.okClass || "btn-primary";
+      modal.classList.remove("hidden");
+
+      return new Promise((resolve) => {
+        const cleanup = () => {
+          modal.classList.add("hidden");
+          okBtn.removeEventListener("click", onOk);
+          modal.querySelectorAll("[data-confirm-cancel]").forEach((el) => {
+            el.removeEventListener("click", onCancel);
+          });
+          document.removeEventListener("keydown", onKey);
+        };
+        const onOk = () => {
+          cleanup();
+          resolve(true);
+        };
+        const onCancel = () => {
+          cleanup();
+          resolve(false);
+        };
+        const onKey = (event) => {
+          if (event.key === "Escape") onCancel();
+        };
+        okBtn.addEventListener("click", onOk);
+        modal.querySelectorAll("[data-confirm-cancel]").forEach((el) => {
+          el.addEventListener("click", onCancel);
+        });
+        document.addEventListener("keydown", onKey);
+        okBtn.focus();
+      });
     }
 
     document.querySelector(".storage-panel").addEventListener("click", async (event) => {
@@ -609,7 +685,15 @@
       const btn = event.target.closest("[data-remove]");
       if (!btn) return;
       const name = btn.getAttribute("data-remove");
-      if (!confirm(`Удалить точку «${name}» из списка? Файл в data/ останется.`)) return;
+      const confirmed = await askConfirm(
+        `Удалить точку «${name}» из списка?\n\nСам Excel-файл в data/ останется на месте.`,
+        {
+          title: "Удаление точки",
+          okText: "Удалить из списка",
+          okClass: "btn-danger",
+        }
+      );
+      if (!confirmed) return;
       try {
         const response = await fetch(`/api/points/${encodeURIComponent(name)}`, {
           method: "DELETE",
@@ -630,19 +714,53 @@
       const month = Number(document.getElementById("month").value);
       const points = selectedPoints();
 
-      const body = { year, month };
+      const body = { year, month, force: false };
       if (points.length) body.points = points;
 
       setLoading(true);
       results.classList.add("hidden");
 
       try {
-        const response = await fetch("/generate", {
+        let response = await fetch("/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const payload = await response.json();
+        let payload = await response.json();
+
+        if (response.status === 409 && payload.detail && payload.detail.code === "already_exists") {
+          setLoading(false);
+          const existing = payload.detail.existing || [];
+          const filesList = existing
+            .map((item) => `• ${item.name}: ${item.filename}`)
+            .join("\n");
+          const message =
+            `${payload.detail.message}\n\nУже существуют:\n${filesList}\n\n` +
+            `Пересоздать эти файлы?\nЕсли нет — нажмите «Отмена» и выберите другой период или точку.`;
+          const confirmed = await askConfirm(message, {
+            title: "Файл за этот период уже есть",
+            note: "При подтверждении существующие файлы в generated/ будут перезаписаны.",
+            okText: "Да, пересоздать",
+            okClass: "btn-primary",
+          });
+          if (!confirmed) {
+            results.className = "results result-card";
+            results.innerHTML =
+              `<h3>Генерация отменена</h3>` +
+              `<p>Выберите другой месяц/год или другую торговую точку и попробуйте снова.</p>`;
+            results.classList.remove("hidden");
+            return;
+          }
+          setLoading(true);
+          body.force = true;
+          response = await fetch("/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          payload = await response.json();
+        }
+
         if (!response.ok) throw new Error(parseError(payload));
         renderResults(payload);
         await refreshStorage();

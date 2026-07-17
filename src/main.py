@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import unicodedata
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -28,6 +30,8 @@ from .generator import ReportGenerator
 from .holidays import HolidaysProvider
 from .models import (
     AddPointManualRequest,
+    ExistingOutputFile,
+    GenerateConflictResponse,
     GenerateRequest,
     GenerateResponse,
     PointInfo,
@@ -35,7 +39,7 @@ from .models import (
     UploadBatchResponse,
     UploadItemResult,
 )
-from .utils import MONTH_NAMES_RU
+from .utils import MONTH_NAMES_RU, sheet_name_for
 
 config: AppConfig | None = None
 generator: ReportGenerator | None = None
@@ -44,6 +48,31 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 SAFE_FILENAME_RE = re.compile(r"^[\w.\- А-Яа-яЁё]+$", re.UNICODE)
+PERIOD_IN_NAME_RE = re.compile(r"^МесОтч(\d{6})_", re.IGNORECASE)
+
+
+def _normalize_text(value: str) -> str:
+    """macOS часто отдаёт NFD (й = и + знак); приводим к NFC."""
+    return unicodedata.normalize("NFC", value or "").strip()
+
+
+def _period_key_from_filename(filename: str) -> int:
+    """МесОтч202604_Смола.xlsx → 202604; если периода нет — 0."""
+    match = PERIOD_IN_NAME_RE.match(Path(filename).name)
+    return int(match.group(1)) if match else 0
+
+
+def _safe_upload_filename(original: str) -> str:
+    name = _normalize_text(Path(unquote(original)).name)
+    if not name.lower().endswith(".xlsx"):
+        raise ValueError("Нужен файл Excel (.xlsx)")
+    if ".." in name or "/" in name or "\\" in name:
+        raise ValueError("Некорректное имя файла")
+    if not SAFE_FILENAME_RE.match(name):
+        raise ValueError(
+            "Некорректное имя файла. Используйте буквы, цифры, пробел, _ . -"
+        )
+    return name
 
 
 def _setup_logging() -> None:
@@ -99,6 +128,7 @@ def _list_storage() -> dict:
         "generated": _list_dir_xlsx(Path(cfg.output_dir)),
     }
 
+
 def _default_period() -> tuple[int, int]:
     today = date.today()
     if today.month == 12:
@@ -119,17 +149,6 @@ def _point_info(point: PointConfig) -> PointInfo:
 def _serialize_points() -> list[PointInfo]:
     cfg = _require_config()
     return [_point_info(p) for p in cfg.points]
-
-
-def _safe_upload_filename(original: str) -> str:
-    name = Path(unquote(original)).name.strip()
-    if not name.lower().endswith(".xlsx"):
-        raise ValueError("Нужен файл Excel (.xlsx)")
-    if not SAFE_FILENAME_RE.match(name) or ".." in name:
-        raise ValueError(
-            "Некорректное имя файла. Используйте буквы, цифры, пробел, _ . -"
-        )
-    return name
 
 
 def _upsert_point(
@@ -167,6 +186,30 @@ def _persist_points() -> None:
     save_points(cfg)
     if generator is not None:
         generator.config = cfg
+
+
+def _move_to_trash(source: Path, kind: str) -> Path:
+    """
+    Перемещает файл в trash/{kind}/ с меткой времени в имени,
+    чтобы не затирать ранее удалённые файлы с тем же именем.
+    """
+    cfg = _require_config()
+    if kind not in {"data", "generated"}:
+        raise ValueError("kind должен быть data или generated")
+
+    trash_subdir = cfg.trash_dir / kind
+    trash_subdir.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = trash_subdir / f"{stamp}__{source.name}"
+    counter = 1
+    while dest.exists():
+        dest = trash_subdir / f"{stamp}_{counter}__{source.name}"
+        counter += 1
+
+    shutil.move(str(source), str(dest))
+    logger.info("Файл перемещён в корзину: {} → {}", source, dest)
+    return dest
 
 
 async def _save_upload_file(upload: UploadFile, dest: Path) -> None:
@@ -248,12 +291,15 @@ async def upload_points(
     При нескольких файлах название берётся из имени каждого файла
     (`МесОтч202603_Берёзка.xlsx` → «Берёзка»).
     Поле `name` используется только если загружен ровно один файл.
+
+    Файлы всегда сохраняются в data/. Точка привязывается к файлу
+    с самым свежим периодом МесОтчYYYYMM (или принудительно при replace).
     """
     cfg = _require_config()
     if not files:
         raise HTTPException(status_code=400, detail="Выберите хотя бы один файл")
 
-    explicit_name = (name or "").strip() or None
+    explicit_name = _normalize_text(name or "") or None
     if explicit_name and len(files) > 1:
         raise HTTPException(
             status_code=400,
@@ -264,6 +310,8 @@ async def upload_points(
         )
 
     results: list[UploadItemResult] = []
+    # point_name → лучший файл в этой загрузке
+    best_in_batch: dict[str, tuple[str, Path, int]] = {}
     changed = False
 
     for upload in files:
@@ -276,28 +324,78 @@ async def upload_points(
                     "Не удалось определить название. "
                     "Используйте файл вида МесОтч202603_Название.xlsx"
                 )
+            point_name = _normalize_text(point_name)
             dest = cfg.data_dir / filename
             await _save_upload_file(upload, dest)
-            point = _upsert_point(point_name, dest, replace=replace, persist=False)
-            changed = True
+            period = _period_key_from_filename(filename)
+            key = point_name.casefold()
+            prev = best_in_batch.get(key)
+            if prev is None or period >= prev[2]:
+                best_in_batch[key] = (point_name, dest, period)
+
             results.append(
                 UploadItemResult(
                     filename=filename,
                     status="ok",
-                    name=point.name,
-                    message=f"Точка «{point.name}» добавлена",
-                    point=point,
+                    name=point_name,
+                    message=f"Файл сохранён: {filename}",
+                    point=None,
                 )
             )
         except Exception as exc:
             logger.warning("Ошибка загрузки {}: {}", original, exc)
             results.append(
                 UploadItemResult(
-                    filename=Path(unquote(original)).name,
+                    filename=_normalize_text(Path(unquote(original)).name),
                     status="error",
                     message=str(exc),
                 )
             )
+
+    # Привязка точек к лучшим файлам пакета
+    for point_name, dest, period in best_in_batch.values():
+        existing = cfg.point_by_name(point_name)
+        existing_period = (
+            _period_key_from_filename(Path(existing.file_path).name)
+            if existing
+            else -1
+        )
+        should_bind = (
+            existing is None
+            or replace
+            or period >= existing_period
+        )
+        if not should_bind:
+            for item in results:
+                if item.status == "ok" and (item.name or "").casefold() == point_name.casefold():
+                    item.message = (
+                        f"Файл сохранён. Точка «{point_name}» уже привязана "
+                        f"к более новому файлу «{Path(existing.file_path).name}»"
+                    )
+            continue
+
+        try:
+            point = _upsert_point(point_name, dest, replace=True, persist=False)
+            changed = True
+            for item in results:
+                if item.status == "ok" and (item.name or "").casefold() == point_name.casefold():
+                    item.point = point
+                    if existing is None:
+                        item.message = f"Точка «{point_name}» добавлена → {dest.name}"
+                    elif Path(existing.file_path).name == dest.name:
+                        item.message = f"Точка «{point_name}» обновлена ({dest.name})"
+                    else:
+                        item.message = (
+                            f"Точка «{point_name}» привязана к {dest.name}"
+                            if item.filename == dest.name
+                            else f"Файл сохранён; точка «{point_name}» → {dest.name}"
+                        )
+        except Exception as exc:
+            logger.warning("Ошибка привязки точки {}: {}", point_name, exc)
+            for item in results:
+                if item.status == "ok" and (item.name or "").casefold() == point_name.casefold():
+                    item.status = "error"
+                    item.message = str(exc)
 
     if changed:
         _persist_points()
@@ -436,18 +534,22 @@ def delete_point(name: str, delete_file: bool = False):
     if generator is not None:
         generator.config = cfg
 
-    removed_file = False
+    trash_path = None
     if delete_file:
         path = Path(point.file_path)
         try:
             path.resolve().relative_to(cfg.data_dir.resolve())
             if path.exists() and path.is_file():
-                path.unlink()
-                removed_file = True
+                trash_path = str(_move_to_trash(path, "data"))
         except ValueError:
-            logger.warning("Файл точки вне data/, не удаляем: {}", path)
+            logger.warning("Файл точки вне data/, не перемещаем в корзину: {}", path)
 
-    return {"status": "ok", "name": name, "file_deleted": removed_file}
+    return {
+        "status": "ok",
+        "name": name,
+        "file_deleted": trash_path is not None,
+        "trash_path": trash_path,
+    }
 
 
 @app.get("/api/storage")
@@ -465,7 +567,7 @@ def api_files():
 @app.delete("/api/storage/{kind}/{filename}", response_model=dict)
 def delete_storage_file(kind: str, filename: str, unlink_point: bool = True):
     """
-    Удалить Excel из data/ или generated/.
+    Переместить Excel из data/ или generated/ в папку trash/.
 
     Для data/: по умолчанию также убирает из списка точку, привязанную к этому файлу.
     """
@@ -485,8 +587,7 @@ def delete_storage_file(kind: str, filename: str, unlink_point: bool = True):
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-    path.unlink()
-    logger.info("Удалён файл {}/{}", kind, filename)
+    trash_path = _move_to_trash(path, kind)
 
     unlinked_points: list[str] = []
     if kind == "data" and unlink_point:
@@ -507,6 +608,7 @@ def delete_storage_file(kind: str, filename: str, unlink_point: bool = True):
         "status": "ok",
         "kind": kind,
         "filename": filename,
+        "trash_path": str(trash_path),
         "unlinked_points": unlinked_points,
     }
 
@@ -542,11 +644,46 @@ def generate(request: GenerateRequest):
     cfg = _require_config()
 
     logger.info(
-        "Запрос генерации: год={} месяц={} точки={}",
+        "Запрос генерации: год={} месяц={} точки={} force={}",
         request.year,
         request.month,
         request.points,
+        request.force,
     )
+
+    try:
+        targets = generator._resolve_points(request.points)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing: list[ExistingOutputFile] = []
+    out_dir = Path(cfg.output_dir)
+    for point in targets:
+        filename = f"МесОтч{request.year}{request.month:02d}_{point.name}.xlsx"
+        path = out_dir / filename
+        if path.exists():
+            existing.append(
+                ExistingOutputFile(
+                    name=point.name,
+                    filename=filename,
+                    path=str(path.resolve()),
+                )
+            )
+
+    if existing and not request.force:
+        period = f"{MONTH_NAMES_RU[request.month]} {request.year}"
+        sheet = sheet_name_for(request.year, request.month)
+        conflict = GenerateConflictResponse(
+            message=(
+                f"За период «{period}» уже есть сгенерированные файлы "
+                f"(лист {sheet}). Подтвердите пересоздание или выберите другой период/точку."
+            ),
+            year=request.year,
+            month=request.month,
+            existing=existing,
+        )
+        raise HTTPException(status_code=409, detail=conflict.model_dump())
+
     try:
         raw_results = generator.generate(request.year, request.month, request.points)
     except ValueError as exc:

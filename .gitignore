@@ -9,6 +9,10 @@ logs/*
 !logs/.gitkeep
 generated/*
 !generated/.gitkeep
+trash/*
+!trash/.gitkeep
+!trash/data/.gitkeep
+!trash/generated/.gitkeep
 *.xlsx
 !data/*.xlsx
 .idea/

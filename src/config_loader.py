@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +53,11 @@ class AppConfig(BaseModel):
         return (base / "data").resolve()
 
     @property
+    def trash_dir(self) -> Path:
+        base = self._base_dir or Path.cwd()
+        return (base / "trash").resolve()
+
+    @property
     def points_path(self) -> Path:
         if self._points_path:
             return self._points_path
@@ -67,10 +73,11 @@ def resolve_path(path: str, base_dir: Path) -> Path:
 
 def infer_point_name_from_filename(filename: str) -> Optional[str]:
     """МесОтч202603_Смола.xlsx → Смола"""
-    match = REPORT_NAME_RE.match(Path(filename).name)
+    name = unicodedata.normalize("NFC", Path(filename).name)
+    match = REPORT_NAME_RE.match(name)
     if match:
         return match.group(1).strip()
-    stem = Path(filename).stem.strip()
+    stem = Path(name).stem.strip()
     return stem or None
 
 

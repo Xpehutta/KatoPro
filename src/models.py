@@ -14,6 +14,10 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Имена торговых точек. Если не указано — обрабатываются все из конфигурации.",
     )
+    force: bool = Field(
+        default=False,
+        description="Перезаписать уже существующие файлы за этот период без дополнительного отказа API",
+    )
 
     @field_validator("points")
     @classmethod
@@ -23,6 +27,20 @@ class GenerateRequest(BaseModel):
                 "Список точек не должен быть пустым; не передавайте поле, чтобы обработать все точки"
             )
         return value
+
+
+class ExistingOutputFile(BaseModel):
+    name: str
+    filename: str
+    path: str
+
+
+class GenerateConflictResponse(BaseModel):
+    code: str = "already_exists"
+    message: str
+    year: int
+    month: int
+    existing: list[ExistingOutputFile]
 
 
 class PointResult(BaseModel):

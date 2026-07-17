@@ -19,7 +19,7 @@ COPY config.yaml .
 COPY src ./src
 COPY templates ./templates
 
-RUN mkdir -p /app/data /app/generated /app/logs
+RUN mkdir -p /app/data /app/generated /app/logs /app/trash/data /app/trash/generated
 
 EXPOSE 8000
 

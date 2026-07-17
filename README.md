@@ -13,28 +13,21 @@
 - REST API и русскоязычный веб-интерфейс;
 - запуск в Docker / Docker Compose.
 
-## Быстрый старт (Docker)
+## Быстрый старт
 
-Требования: Docker и Docker Compose.
+Кратко:
 
 ```bash
-# 1. Положите исходные Excel-файлы точек в папку data/
-#    например: data/МесОтч202603_Смола.xlsx
-
-# 2. Запустите сервис
+git clone https://github.com/Xpehutta/KatoPro.git
+cd KatoPro
 docker compose up -d --build
-
-# 3. Откройте веб-интерфейс
-open http://localhost:8000
 ```
 
-Документация API (Swagger): http://localhost:8000/docs
+Откройте в браузере: [http://localhost:8000](http://localhost:8000)
 
-Остановка:
+Полная пошаговая инструкция для новичка (установка Docker и Git, `git clone` / `git pull`, подготовка Excel, генерация, типовые ошибки):
 
-```bash
-docker compose down
-```
+**→ [USER_GUIDE.md — Быстрый старт](USER_GUIDE.md#2-быстрый-старт-для-новичка)**
 
 ## Локальный запуск без Docker
 
@@ -95,7 +88,7 @@ KatoPro/
 | `POST` | `/generate` | Генерация отчётов |
 | `GET` | `/api/points` | Список точек |
 | `GET` | `/api/storage` | Список файлов в `data/` и `generated/` |
-| `DELETE` | `/api/storage/{kind}/{filename}` | Удалить файл (`kind`: `data` или `generated`) |
+| `DELETE` | `/api/storage/{kind}/{filename}` | Переместить файл в `trash/` (`kind`: `data` или `generated`) |
 | `GET` | `/download/{kind}/{filename}` | Скачать файл (`kind`: `data` или `generated`) |
 | `POST` | `/api/points/upload` | Добавить точки (один или несколько файлов) |
 | `POST` | `/api/points/import-data` | Зарегистрировать все Excel из `data/` |
@@ -116,6 +109,7 @@ curl -X POST http://localhost:8000/generate \
 |------|-----------|------------|
 | `./data` | `/app/data` | Исходные Excel и `points.yaml` |
 | `./generated` | `/app/generated` | Результаты генерации |
+| `./trash` | `/app/trash` | Корзина удалённых файлов |
 | `./config.yaml` | `/app/config.yaml` | Настройки |
 | `./logs` | `/app/logs` | Логи |
 
@@ -129,7 +123,8 @@ curl -X POST http://localhost:8000/generate \
 
 ## Документация
 
-- [USER_GUIDE.md](USER_GUIDE.md) — как пользоваться сервисом
+- [USER_GUIDE.md](USER_GUIDE.md) — руководство пользователя
+- [USER_GUIDE.md — Быстрый старт](USER_GUIDE.md#2-быстрый-старт-для-новичка) — установка, clone/pull, первый запуск
 - [AGENT.md](AGENT.md) — исходное техническое задание
 
 ## Лицензия
