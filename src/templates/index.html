@@ -58,10 +58,6 @@
                 />
               </label>
               <div id="upload-file-list" class="file-preview empty">Файлы не выбраны</div>
-              <label class="check-inline">
-                <input id="upload-replace" type="checkbox" />
-                Принудительно заменить даже на более старый файл
-              </label>
               <div class="actions tight">
                 <button type="submit" class="btn-primary" id="upload-btn">Загрузить выбранные</button>
                 <button type="button" class="btn-secondary" id="import-data-btn">Импорт всех из data/</button>
@@ -414,10 +410,11 @@
 
     async function refreshStorage() {
       const response = await fetch("/api/storage");
-      if (!response.ok) return;
+      if (!response.ok) return null;
       const storage = await response.json();
       renderStorageList("data", storage.data || []);
       renderStorageList("generated", storage.generated || []);
+      return storage;
     }
 
     function renderResults(payload) {
@@ -633,15 +630,53 @@
         showPointsMsg("Выберите один или несколько Excel-файлов", "error");
         return;
       }
-      const data = new FormData();
-      files.forEach((file) => data.append("files", file));
-      const name = document.getElementById("upload-name").value.trim();
-      if (name) data.append("name", name);
-      data.append("replace", document.getElementById("upload-replace").checked ? "true" : "false");
 
       const btn = document.getElementById("upload-btn");
       btn.disabled = true;
       try {
+        const storage = (await refreshStorage()) || { data: [] };
+        const existing = new Set(
+          (storage.data || []).map((item) => String(item.name || "").toLocaleLowerCase("ru"))
+        );
+        const conflicts = files.filter((file) =>
+          existing.has(String(file.name || "").toLocaleLowerCase("ru"))
+        );
+
+        let filesToUpload = files;
+        let replace = false;
+        if (conflicts.length) {
+          const list = conflicts.map((file) => `• ${file.name}`).join("\n");
+          const confirmed = await askConfirm(
+            `В data/ уже есть файлы с такими именами:\n\n${list}\n\nЗаменить их?`,
+            {
+              title: "Файлы уже существуют",
+              note: "При отказе совпадающие файлы будут пропущены, остальные загрузятся.",
+              okText: "Да, заменить",
+              okClass: "btn-primary",
+            }
+          );
+          if (confirmed) {
+            replace = true;
+          } else {
+            const skip = new Set(
+              conflicts.map((file) => String(file.name || "").toLocaleLowerCase("ru"))
+            );
+            filesToUpload = files.filter(
+              (file) => !skip.has(String(file.name || "").toLocaleLowerCase("ru"))
+            );
+            if (!filesToUpload.length) {
+              showPointsMsg("Загрузка отменена: все выбранные файлы уже есть", "error");
+              return;
+            }
+          }
+        }
+
+        const data = new FormData();
+        filesToUpload.forEach((file) => data.append("files", file));
+        const name = document.getElementById("upload-name").value.trim();
+        if (name) data.append("name", name);
+        data.append("replace", replace ? "true" : "false");
+
         const response = await fetch("/api/points/upload", { method: "POST", body: data });
         const payload = await response.json();
         if (!response.ok) throw new Error(parseError(payload));
@@ -663,13 +698,11 @@
 
     document.getElementById("import-data-btn").addEventListener("click", async () => {
       const btn = document.getElementById("import-data-btn");
-      const replace = document.getElementById("upload-replace").checked;
       btn.disabled = true;
       try {
-        const response = await fetch(
-          `/api/points/import-data?replace=${replace ? "true" : "false"}`,
-          { method: "POST" }
-        );
+        const response = await fetch("/api/points/import-data?replace=false", {
+          method: "POST",
+        });
         const payload = await response.json();
         if (!response.ok) throw new Error(parseError(payload));
         const kind = payload.status === "error" ? "error" : "ok";

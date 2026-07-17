@@ -292,8 +292,11 @@ async def upload_points(
     (`МесОтч202603_Берёзка.xlsx` → «Берёзка»).
     Поле `name` используется только если загружен ровно один файл.
 
-    Файлы всегда сохраняются в data/. Точка привязывается к файлу
-    с самым свежим периодом МесОтчYYYYMM (или принудительно при replace).
+    Если файл с таким именем уже есть в data/ — нужен `replace=true`
+    (согласие пользователя в веб-интерфейсе).
+
+    В одной загрузке несколько файлов одной точки сохраняются все;
+    точка привязывается к файлу с самым свежим периодом МесОтчYYYYMM.
     """
     cfg = _require_config()
     if not files:
@@ -310,7 +313,6 @@ async def upload_points(
         )
 
     results: list[UploadItemResult] = []
-    # point_name → лучший файл в этой загрузке
     best_in_batch: dict[str, tuple[str, Path, int]] = {}
     changed = False
 
@@ -326,6 +328,11 @@ async def upload_points(
                 )
             point_name = _normalize_text(point_name)
             dest = cfg.data_dir / filename
+            if dest.exists() and not replace:
+                raise ValueError(
+                    f"Файл «{filename}» уже есть. Подтвердите замену."
+                )
+
             await _save_upload_file(upload, dest)
             period = _period_key_from_filename(filename)
             key = point_name.casefold()
@@ -352,43 +359,35 @@ async def upload_points(
                 )
             )
 
-    # Привязка точек к лучшим файлам пакета
-    for point_name, dest, period in best_in_batch.values():
+    for point_name, dest, _period in best_in_batch.values():
         existing = cfg.point_by_name(point_name)
-        existing_period = (
-            _period_key_from_filename(Path(existing.file_path).name)
-            if existing
-            else -1
-        )
-        should_bind = (
-            existing is None
-            or replace
-            or period >= existing_period
-        )
-        if not should_bind:
-            for item in results:
-                if item.status == "ok" and (item.name or "").casefold() == point_name.casefold():
-                    item.message = (
-                        f"Файл сохранён. Точка «{point_name}» уже привязана "
-                        f"к более новому файлу «{Path(existing.file_path).name}»"
-                    )
-            continue
-
         try:
-            point = _upsert_point(point_name, dest, replace=True, persist=False)
+            point = _upsert_point(
+                point_name,
+                dest,
+                replace=existing is not None,
+                persist=False,
+            )
             changed = True
             for item in results:
                 if item.status == "ok" and (item.name or "").casefold() == point_name.casefold():
                     item.point = point
+                    item_name = (item.filename or "").casefold()
                     if existing is None:
-                        item.message = f"Точка «{point_name}» добавлена → {dest.name}"
-                    elif Path(existing.file_path).name == dest.name:
-                        item.message = f"Точка «{point_name}» обновлена ({dest.name})"
+                        item.message = (
+                            f"Точка «{point_name}» добавлена → {dest.name}"
+                            if item_name == dest.name.casefold()
+                            else f"Файл сохранён; точка «{point_name}» → {dest.name}"
+                        )
+                    elif item_name == Path(existing.file_path).name.casefold():
+                        item.message = f"Файл «{item.filename}» обновлён"
+                    elif item_name == dest.name.casefold():
+                        item.message = (
+                            f"Точка «{point_name}» → {dest.name}"
+                        )
                     else:
                         item.message = (
-                            f"Точка «{point_name}» привязана к {dest.name}"
-                            if item.filename == dest.name
-                            else f"Файл сохранён; точка «{point_name}» → {dest.name}"
+                            f"Файл сохранён; точка «{point_name}» → {dest.name}"
                         )
         except Exception as exc:
             logger.warning("Ошибка привязки точки {}: {}", point_name, exc)
@@ -435,7 +434,7 @@ def import_points_from_data(replace: bool = False):
                     filename=filename,
                     status="error",
                     name=suggested,
-                    message="Файл уже привязан к точке (включите замену)",
+                    message="Файл уже привязан к точке — пропуск",
                 )
             )
             continue
