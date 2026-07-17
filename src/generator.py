@@ -126,6 +126,8 @@ class ReportGenerator:
             year=year,
             month=month,
             prev_sheet_name=prev_sheet_name,
+            prev_ws=template_ws,
+            source_path=src,
             non_working=all_non_working,
             weekday_holidays=weekday_holidays,
         )
@@ -238,12 +240,78 @@ class ReportGenerator:
             f"Не найден лист предыдущего месяца до {sheet_name_for(year, month)}"
         )
 
+    def _last_cash_balance_row(self, prev_ws: Worksheet) -> Optional[int]:
+        """Строка последней даты в колонке A (зона ежедневных данных)."""
+        last_row: Optional[int] = None
+        max_row = prev_ws.max_row or DATA_START_ROW
+        for row in range(DATA_START_ROW, max_row + 1):
+            val = prev_ws.cell(row, 1).value
+            if isinstance(val, (datetime, date)):
+                last_row = row
+            elif last_row is not None and val is None:
+                break
+        return last_row
+
+    def _opening_balance_for_a3(
+        self,
+        prev_ws: Worksheet,
+        prev_sheet_name: str,
+        source_path: Optional[Path] = None,
+    ):
+        """
+        Остаток в кассе за последнюю дату предыдущего месяца → в A3.
+        Предпочтительно копируем рассчитанное число; иначе — ссылку на ячейку.
+        """
+        last_row = self._last_cash_balance_row(prev_ws)
+        if last_row is None:
+            logger.warning(
+                "Не найдена последняя дата на листе {} — fallback на I3",
+                prev_sheet_name,
+            )
+            return f"={prev_sheet_name}!I3"
+
+        cell = prev_ws.cell(last_row, 9)  # колонка I — «Остаток в кассе»
+        if isinstance(cell.value, (int, float)):
+            logger.info(
+                "A3 ← число из {}!I{} = {}",
+                prev_sheet_name,
+                last_row,
+                cell.value,
+            )
+            return cell.value
+
+        # Попробуем кэш рассчитанных значений Excel (data_only)
+        if source_path is not None and source_path.exists():
+            try:
+                cached_wb = load_workbook(source_path, data_only=True)
+                if prev_sheet_name in cached_wb.sheetnames:
+                    cached_val = cached_wb[prev_sheet_name].cell(last_row, 9).value
+                    cached_wb.close()
+                    if isinstance(cached_val, (int, float)):
+                        logger.info(
+                            "A3 ← кэш Excel {}!I{} = {}",
+                            prev_sheet_name,
+                            last_row,
+                            cached_val,
+                        )
+                        return cached_val
+                else:
+                    cached_wb.close()
+            except Exception as exc:
+                logger.warning("Не удалось прочитать data_only из {}: {}", source_path, exc)
+
+        ref = f"={prev_sheet_name}!I{last_row}"
+        logger.info("A3 ← ссылка на остаток за последнюю дату: {}", ref)
+        return ref
+
     def _rebuild_sheet(
         self,
         ws: Worksheet,
         year: int,
         month: int,
         prev_sheet_name: str,
+        prev_ws: Worksheet,
+        source_path: Optional[Path],
         non_working: set[date],
         weekday_holidays: list[date],
     ) -> None:
@@ -255,7 +323,9 @@ class ReportGenerator:
         self._clear_data_area(ws, DATA_START_ROW, max(ws.max_row or 60, 60))
         self._clear_holiday_helper(ws)
 
-        ws["A3"] = f"={prev_sheet_name}!I3"
+        opening = self._opening_balance_for_a3(prev_ws, prev_sheet_name, source_path)
+        ws["A3"] = opening
+        ws["A3"].number_format = MONEY_FMT
         ws["D3"] = f"=D{sum_row}"
         ws["E3"] = f"=E{sum_row}"
         ws["G3"] = f"=G{sum_row}"
