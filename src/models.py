@@ -86,6 +86,8 @@ class PointResult(BaseModel):
     output_file: Optional[str] = None
     sheet_name: Optional[str] = None
     message: Optional[str] = None
+    year: Optional[int] = None
+    month: Optional[int] = None
 
 
 class GenerateResponse(BaseModel):

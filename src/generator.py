@@ -70,6 +70,8 @@ class ReportGenerator:
                         "output_file": None,
                         "sheet_name": None,
                         "message": str(exc),
+                        "year": y,
+                        "month": m,
                     }
                 )
         return results
@@ -138,6 +140,8 @@ class ReportGenerator:
             "status": "ok",
             "output_file": str(dest),
             "sheet_name": new_sheet,
+            "year": year,
+            "month": month,
             "message": (
                 f"Создан лист {new_sheet}; "
                 f"праздников для NETWORKDAYS: {len(weekday_holidays)}"

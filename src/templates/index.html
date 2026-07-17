@@ -443,6 +443,12 @@
       return storage;
     }
 
+    function formatPeriod(year, month) {
+      if (!year || !month) return "—";
+      const label = monthOptions.find((m) => m.value === Number(month))?.label;
+      return label ? `${label} ${year}` : `${month}.${year}`;
+    }
+
     function renderResults(payload) {
       const items = (payload.results || [])
         .map((item) => {
@@ -453,24 +459,44 @@
             item.status === "ok" && filename
               ? `<div><a href="/download/generated/${encodeURIComponent(filename)}">Скачать файл</a></div>`
               : "";
+          const period =
+            item.year && item.month
+              ? formatPeriod(item.year, item.month)
+              : formatPeriod(payload.year, payload.month);
           return `
             <li class="result-item">
               <div><strong>${escapeHtml(item.name)}</strong> <span class="badge ${badge}">${
                 statusLabels[item.status] || item.status
               }</span></div>
-              <div class="meta">Лист: ${escapeHtml(item.sheet_name || "—")} · ${escapeHtml(
-                item.message || ""
-              )}</div>
+              <div class="meta">Период: ${escapeHtml(period)} · Лист: ${escapeHtml(
+                item.sheet_name || "—"
+              )} · ${escapeHtml(item.message || "")}</div>
               ${download}
             </li>
           `;
         })
         .join("");
 
+      const periodKeys = new Set(
+        (payload.results || [])
+          .filter((item) => item.year && item.month)
+          .map((item) => `${item.year}-${item.month}`)
+      );
+      let periodSummary;
+      if (periodKeys.size === 1) {
+        const [only] = periodKeys;
+        const [y, m] = only.split("-").map(Number);
+        periodSummary = formatPeriod(y, m);
+      } else if (periodKeys.size > 1) {
+        periodSummary = "разные по точкам (см. ниже)";
+      } else {
+        periodSummary = formatPeriod(payload.year, payload.month);
+      }
+
       results.className = `results result-card ${payload.status}`;
       results.innerHTML = `
         <h3>Результат: ${statusLabels[payload.status] || payload.status}</h3>
-        <div class="meta">Период: ${payload.month}.${payload.year}</div>
+        <div class="meta">Период: ${escapeHtml(periodSummary)}</div>
         <ul class="result-list">${items}</ul>
       `;
       results.classList.remove("hidden");
