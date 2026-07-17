@@ -95,7 +95,11 @@ KatoPro/
 | `GET` | `/api/points` | Список точек |
 | `GET` | `/api/storage` | Список файлов в `data/` и `generated/` |
 | `DELETE` | `/api/storage/{kind}/{filename}` | Переместить файл в `trash/` (`kind`: `data` или `generated`) |
+| `POST` | `/api/storage/clear-session` | Удалить файлы: параметры `clear_data` / `clear_generated` (Excel → `trash/`; при `data/` также очищаются точки) |
+| `POST` | `/api/storage/generated/{filename}/to-data` | Переместить файл из `generated/` в `data/` (`replace=true` при конфликте имени) |
 | `GET` | `/download/{kind}/{filename}` | Скачать файл (`kind`: `data` или `generated`) |
+| `GET` | `/api/points/scan-data` | Найти в `data/` точки, которых ещё нет в списке |
+| `POST` | `/api/points/sync-data` | Добавить найденные новые точки из `data/` |
 | `POST` | `/api/points/upload` | Добавить точки (один или несколько файлов; `replace=true` — перезаписать существующие имена) |
 | `POST` | `/api/points/import-data` | Зарегистрировать незанятые Excel из `data/` |
 

@@ -70,7 +70,10 @@
                   <h3>Файлы на диске</h3>
                   <p class="hint">Исходные книги и уже сгенерированные отчёты</p>
                 </div>
-                <button type="button" class="btn-secondary" id="refresh-storage-btn">Обновить</button>
+                <div class="storage-head-actions">
+                  <button type="button" class="btn-secondary" id="refresh-storage-btn">Обновить</button>
+                  <button type="button" class="btn-danger" id="clear-session-btn">Удалить файлы</button>
+                </div>
               </div>
 
               <div class="storage-tabs" role="tablist">
@@ -120,6 +123,7 @@
                     </div>
                     <div class="storage-actions">
                       <a class="button btn-secondary" href="/download/generated/{{ file.name }}">Скачать</a>
+                      <button type="button" class="btn-secondary" data-to-data="{{ file.name }}">В исходные</button>
                       <button type="button" class="btn-danger" data-delete-file="generated" data-filename="{{ file.name }}">Удалить</button>
                     </div>
                   </li>
@@ -135,8 +139,11 @@
 
           <div class="points-manage">
             <div class="points-head">
-              <strong>Список точек</strong>
-              <span class="hint" id="points-count">{{ points|length }} шт.</span>
+              <div>
+                <strong>Список точек</strong>
+                <span class="hint" id="points-count">{{ points|length }} шт.</span>
+              </div>
+              <button type="button" class="btn-secondary" id="refresh-points-btn">Обновить</button>
             </div>
             <ul class="points-manage-list" id="points-manage-list">
               {% if points %}
@@ -267,6 +274,29 @@
       <div class="modal-actions">
         <button type="button" class="btn-secondary" data-confirm-cancel>Отмена</button>
         <button type="button" class="btn-danger" id="confirm-ok">Подтвердить</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="clear-session-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="clear-session-title">
+    <div class="modal-backdrop" data-clear-cancel></div>
+    <div class="modal-card">
+      <h3 id="clear-session-title">Удалить файлы</h3>
+      <p class="modal-message">Выберите, из каких папок удалить файлы (они будут перемещены в trash/):</p>
+      <div class="clear-session-options">
+        <label class="check-inline">
+          <input id="clear-opt-data" type="checkbox" checked />
+          Исходные (<code>data/</code>) — также очистит список точек
+        </label>
+        <label class="check-inline">
+          <input id="clear-opt-generated" type="checkbox" checked />
+          Сгенерированные (<code>generated/</code>)
+        </label>
+      </div>
+      <p class="modal-note">Файлы не удаляются навсегда — их можно найти в папке trash/.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" data-clear-cancel>Отмена</button>
+        <button type="button" class="btn-danger" id="clear-session-ok">Удалить выбранное</button>
       </div>
     </div>
   </div>
@@ -406,6 +436,12 @@
             kind === "data" && file.linked_point
               ? ` data-linked="${escapeHtml(file.linked_point)}"`
               : "";
+          const toDataBtn =
+            kind === "generated"
+              ? `<button type="button" class="btn-secondary" data-to-data="${escapeHtml(
+                  file.name
+                )}">В исходные</button>`
+              : "";
           return `
             <li class="storage-row">
               <div>
@@ -418,6 +454,7 @@
                 <a class="button btn-secondary" href="/download/${kind}/${encodeURIComponent(
                   file.name
                 )}">Скачать</a>
+                ${toDataBtn}
                 <button type="button" class="btn-danger" data-delete-file="${kind}" data-filename="${escapeHtml(
                   file.name
                 )}"${linkedAttr}>Удалить</button>
@@ -540,6 +577,78 @@
     document.getElementById("refresh-storage-btn").addEventListener("click", async () => {
       await refreshStorage();
     });
+
+    document.getElementById("clear-session-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("clear-session-btn");
+      const choice = await askClearSession();
+      if (!choice) return;
+
+      btn.disabled = true;
+      try {
+        const params = new URLSearchParams({
+          clear_data: choice.clearData ? "true" : "false",
+          clear_generated: choice.clearGenerated ? "true" : "false",
+        });
+        const response = await fetch(`/api/storage/clear-session?${params}`, {
+          method: "POST",
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+        showPointsMsg(payload.message || "Файлы удалены", "ok");
+        await refreshPoints();
+        await refreshStorage();
+        results.classList.add("hidden");
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    function askClearSession() {
+      const modal = document.getElementById("clear-session-modal");
+      const okBtn = document.getElementById("clear-session-ok");
+      const dataCb = document.getElementById("clear-opt-data");
+      const generatedCb = document.getElementById("clear-opt-generated");
+      dataCb.checked = true;
+      generatedCb.checked = true;
+      modal.classList.remove("hidden");
+
+      return new Promise((resolve) => {
+        const cleanup = () => {
+          modal.classList.add("hidden");
+          okBtn.removeEventListener("click", onOk);
+          modal.querySelectorAll("[data-clear-cancel]").forEach((el) => {
+            el.removeEventListener("click", onCancel);
+          });
+          document.removeEventListener("keydown", onKey);
+        };
+        const onOk = () => {
+          if (!dataCb.checked && !generatedCb.checked) {
+            showPointsMsg("Выберите хотя бы одну папку", "error");
+            return;
+          }
+          cleanup();
+          resolve({
+            clearData: dataCb.checked,
+            clearGenerated: generatedCb.checked,
+          });
+        };
+        const onCancel = () => {
+          cleanup();
+          resolve(null);
+        };
+        const onKey = (event) => {
+          if (event.key === "Escape") onCancel();
+        };
+        okBtn.addEventListener("click", onOk);
+        modal.querySelectorAll("[data-clear-cancel]").forEach((el) => {
+          el.addEventListener("click", onCancel);
+        });
+        document.addEventListener("keydown", onKey);
+        okBtn.focus();
+      });
+    }
 
     async function deleteStorageFile(kind, filename, linkedPoint) {
       let message = `Переместить файл «${filename}» из ${kind}/ в корзину?`;
@@ -727,7 +836,72 @@
       });
     }
 
+    async function moveGeneratedToData(filename) {
+      const confirmed = await askConfirm(
+        `Переместить «${filename}» из generated/ в data/ (исходные)?\n\n` +
+          `Точка из имени файла будет привязана к этому файлу.`,
+        {
+          title: "В исходные",
+          note: "Файл исчезнет из списка сгенерированных и появится в data/.",
+          okText: "Переместить",
+          okClass: "btn-primary",
+        }
+      );
+      if (!confirmed) return;
+
+      let response = await fetch(
+        `/api/storage/generated/${encodeURIComponent(filename)}/to-data?replace=false`,
+        { method: "POST" }
+      );
+      let payload = await response.json();
+
+      if (response.status === 409 && payload.detail && payload.detail.code === "already_exists") {
+        const replaceOk = await askConfirm(
+          `${payload.detail.message || "Файл уже есть в data/"}\n\nЗаменить файл в data/?`,
+          {
+            title: "Файл уже есть в data/",
+            note: "Текущий файл в data/ будет перемещён в trash/.",
+            okText: "Да, заменить",
+            okClass: "btn-primary",
+          }
+        );
+        if (!replaceOk) return;
+        response = await fetch(
+          `/api/storage/generated/${encodeURIComponent(filename)}/to-data?replace=true`,
+          { method: "POST" }
+        );
+        payload = await response.json();
+      }
+
+      if (!response.ok) throw new Error(parseError(payload));
+
+      const pointName = payload.point && payload.point.name;
+      showPointsMsg(
+        pointName
+          ? `«${filename}» перемещён в data/. Точка «${pointName}» привязана.`
+          : `«${filename}» перемещён в data/.`,
+        "ok"
+      );
+      await refreshStorage();
+      await refreshPoints();
+      switchStorageTab("data");
+    }
+
     document.querySelector(".storage-panel").addEventListener("click", async (event) => {
+      const toDataBtn = event.target.closest("[data-to-data]");
+      if (toDataBtn) {
+        const filename = toDataBtn.getAttribute("data-to-data");
+        toDataBtn.disabled = true;
+        try {
+          await moveGeneratedToData(filename);
+        } catch (err) {
+          showPointsMsg(err.message || err, "error");
+        } finally {
+          toDataBtn.disabled = false;
+        }
+        return;
+      }
+
       const btn = event.target.closest("[data-delete-file]");
       if (!btn) return;
       const kind = btn.getAttribute("data-delete-file");
@@ -842,6 +1016,56 @@
         await refreshPoints();
         await refreshStorage();
         switchStorageTab("data");
+      } catch (err) {
+        showPointsMsg(err.message || err, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("refresh-points-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("refresh-points-btn");
+      btn.disabled = true;
+      try {
+        await refreshStorage();
+        const response = await fetch("/api/points/scan-data");
+        const payload = await response.json();
+        if (!response.ok) throw new Error(parseError(payload));
+
+        const missing = payload.missing || [];
+        if (!missing.length) {
+          showPointsMsg(
+            `Анализ data/: новых точек нет (файлов: ${payload.data_files}, в списке: ${payload.points_count})`,
+            "ok"
+          );
+          await refreshPoints();
+          return;
+        }
+
+        const list = missing
+          .map((item) => `• ${item.name} ← ${item.filename}`)
+          .join("\n");
+        const confirmed = await askConfirm(
+          `В data/ найдены точки, которых нет в списке (${missing.length}):\n\n${list}\n\nДобавить их?`,
+          {
+            title: "Новые точки в data/",
+            note: "Для каждой точки будет выбран файл с самым свежим периодом в имени.",
+            okText: "Добавить",
+            okClass: "btn-primary",
+          }
+        );
+        if (!confirmed) {
+          showPointsMsg("Добавление новых точек отменено", "error");
+          return;
+        }
+
+        const syncResp = await fetch("/api/points/sync-data", { method: "POST" });
+        const syncPayload = await syncResp.json();
+        if (!syncResp.ok) throw new Error(parseError(syncPayload));
+        const kind = syncPayload.status === "error" ? "error" : "ok";
+        showPointsMsg(summarizeBatch(syncPayload), kind);
+        await refreshPoints();
+        await refreshStorage();
       } catch (err) {
         showPointsMsg(err.message || err, "error");
       } finally {

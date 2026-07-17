@@ -525,6 +525,124 @@ async def upload_points(
     )
 
 
+def _discover_missing_points() -> list[dict]:
+    """
+    Точки из имён файлов data/, которых ещё нет в списке.
+    Для каждой точки берётся файл с самым свежим периодом МесОтчYYYYMM.
+    """
+    cfg = _require_config()
+    known = {p.name.strip().casefold() for p in cfg.points}
+    best: dict[str, dict] = {}
+
+    for item in scan_data_workbooks(cfg.data_dir):
+        suggested = _normalize_text(item.get("suggested_name") or "")
+        if not suggested:
+            continue
+        key = suggested.casefold()
+        if key in known:
+            continue
+        period = _period_key_from_filename(item["filename"])
+        prev = best.get(key)
+        if prev is None or period >= prev["period"]:
+            best[key] = {
+                "name": suggested,
+                "filename": item["filename"],
+                "path": item["path"],
+                "period": period,
+            }
+
+    missing = []
+    for entry in sorted(best.values(), key=lambda x: x["name"].casefold()):
+        missing.append(
+            {
+                "name": entry["name"],
+                "filename": entry["filename"],
+                "path": entry["path"],
+                "period": entry["period"] or None,
+            }
+        )
+    return missing
+
+
+@app.get("/api/points/scan-data")
+def scan_points_in_data():
+    """Найти в data/ точки, которых ещё нет в списке."""
+    cfg = _require_config()
+    missing = _discover_missing_points()
+    return {
+        "status": "ok",
+        "points_count": len(cfg.points),
+        "data_files": len(scan_data_workbooks(cfg.data_dir)),
+        "missing_count": len(missing),
+        "missing": missing,
+    }
+
+
+@app.post("/api/points/sync-data", response_model=UploadBatchResponse)
+def sync_points_from_data():
+    """Добавить в список все точки из data/, которых ещё нет."""
+    missing = _discover_missing_points()
+    results: list[UploadItemResult] = []
+    changed = False
+
+    if not missing:
+        return UploadBatchResponse(
+            status="ok",
+            total=0,
+            succeeded=0,
+            failed=0,
+            results=[],
+        )
+
+    for item in missing:
+        try:
+            point = _upsert_point(
+                item["name"],
+                Path(item["path"]),
+                replace=False,
+                persist=False,
+            )
+            changed = True
+            results.append(
+                UploadItemResult(
+                    filename=item["filename"],
+                    status="ok",
+                    name=point.name,
+                    message=f"Точка «{point.name}» добавлена → {item['filename']}",
+                    point=point,
+                )
+            )
+        except Exception as exc:
+            results.append(
+                UploadItemResult(
+                    filename=item["filename"],
+                    status="error",
+                    name=item["name"],
+                    message=str(exc),
+                )
+            )
+
+    if changed:
+        _persist_points()
+
+    succeeded = sum(1 for r in results if r.status == "ok")
+    failed = len(results) - succeeded
+    if failed == 0:
+        status = "ok"
+    elif succeeded == 0:
+        status = "error"
+    else:
+        status = "partial_error"
+
+    return UploadBatchResponse(
+        status=status,
+        total=len(results),
+        succeeded=succeeded,
+        failed=failed,
+        results=results,
+    )
+
+
 @app.post("/api/points/import-data", response_model=UploadBatchResponse)
 def import_points_from_data(replace: bool = False):
     """Зарегистрировать все Excel из data/, ещё не добавленные в список точек."""
@@ -671,6 +789,65 @@ def api_files():
     return _list_generated_files()
 
 
+@app.post("/api/storage/clear-session", response_model=dict)
+def clear_session(clear_data: bool = False, clear_generated: bool = False):
+    """
+    Очистить выбранные папки сессии.
+    Excel из отмеченных каталогов → trash/.
+    При очистке data/ также обнуляется список точек.
+    """
+    if not clear_data and not clear_generated:
+        raise HTTPException(
+            status_code=400,
+            detail="Выберите хотя бы одну папку: data/ или generated/",
+        )
+
+    cfg = _require_config()
+    moved_data: list[str] = []
+    moved_generated: list[str] = []
+    cleared_points: list[str] = []
+
+    if clear_data:
+        for path in sorted(cfg.data_dir.glob("*.xlsx")):
+            if path.is_file():
+                _move_to_trash(path, "data")
+                moved_data.append(path.name)
+        cleared_points = [p.name for p in cfg.points]
+        cfg.points = []
+        save_points(cfg)
+        if generator is not None:
+            generator.config = cfg
+
+    if clear_generated:
+        out_dir = Path(cfg.output_dir)
+        if out_dir.exists():
+            for path in sorted(out_dir.glob("*.xlsx")):
+                if path.is_file():
+                    _move_to_trash(path, "generated")
+                    moved_generated.append(path.name)
+
+    parts = []
+    if clear_data:
+        parts.append(f"{len(moved_data)} из data/")
+        parts.append(f"точек снято: {len(cleared_points)}")
+    if clear_generated:
+        parts.append(f"{len(moved_generated)} из generated/")
+
+    logger.info(
+        "Сессия очищена: data={} generated={} points={}",
+        len(moved_data),
+        len(moved_generated),
+        len(cleared_points),
+    )
+    return {
+        "status": "ok",
+        "moved_data": moved_data,
+        "moved_generated": moved_generated,
+        "cleared_points": cleared_points,
+        "message": "Удалено: " + ", ".join(parts),
+    }
+
+
 @app.delete("/api/storage/{kind}/{filename}", response_model=dict)
 def delete_storage_file(kind: str, filename: str, unlink_point: bool = True):
     """
@@ -717,6 +894,74 @@ def delete_storage_file(kind: str, filename: str, unlink_point: bool = True):
         "filename": filename,
         "trash_path": str(trash_path),
         "unlinked_points": unlinked_points,
+    }
+
+
+@app.post("/api/storage/generated/{filename}/to-data", response_model=dict)
+def move_generated_to_data(filename: str, replace: bool = False, link_point: bool = True):
+    """
+    Переместить файл из generated/ в data/ (сделать исходником).
+
+    Если в data/ уже есть файл с тем же именем — нужен replace=true.
+    При link_point=true точка с именем из файла привязывается к перемещённому файлу.
+    """
+    cfg = _require_config()
+    filename = _normalize_text(filename)
+    if not SAFE_FILENAME_RE.match(filename) or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Некорректное имя файла")
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Нужен файл Excel (.xlsx)")
+
+    src_dir = Path(cfg.output_dir).resolve()
+    src = (src_dir / filename).resolve()
+    try:
+        src.relative_to(src_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Некорректный путь к файлу") from exc
+
+    if not src.exists() or not src.is_file():
+        raise HTTPException(status_code=404, detail="Файл не найден в generated/")
+
+    dest = cfg.data_dir / filename
+    if dest.exists() and not replace:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "already_exists",
+                "message": (
+                    f"В data/ уже есть файл «{filename}». "
+                    "Подтвердите замену, чтобы перезаписать его."
+                ),
+                "filename": filename,
+            },
+        )
+
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        _move_to_trash(dest, "data")
+    shutil.move(str(src), str(dest))
+    logger.info("Файл перемещён в исходные: {} → {}", src, dest)
+
+    point_info = None
+    point_name = infer_point_name_from_filename(filename)
+    if link_point and point_name:
+        point_name = _normalize_text(point_name)
+        existing = cfg.point_by_name(point_name)
+        point_info = _upsert_point(
+            point_name,
+            dest,
+            replace=existing is not None,
+            persist=True,
+        )
+
+    return {
+        "status": "ok",
+        "filename": filename,
+        "from": "generated",
+        "to": "data",
+        "path": str(dest.resolve()),
+        "point": point_info.model_dump() if point_info else None,
+        "point_linked": point_info is not None,
     }
 
 

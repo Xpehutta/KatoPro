@@ -196,6 +196,29 @@ input:focus {
   margin-bottom: 0.75rem;
 }
 
+.storage-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.storage-head-actions .btn-secondary,
+.storage-head-actions .btn-danger {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.clear-session-options {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.85rem 0 0.35rem;
+}
+
+.clear-session-options .check-inline {
+  align-items: flex-start;
+}
+
 .points-head strong {
   font-size: 0.95rem;
 }
@@ -491,6 +514,19 @@ button,
   margin-top: 1.1rem;
 }
 
+.points-manage .points-head {
+  align-items: center;
+}
+
+.points-manage .points-head .btn-secondary {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.points-manage .points-head .hint {
+  margin-left: 0.45rem;
+}
+
 .points-manage-list {
   list-style: none;
   margin: 0.7rem 0 0;
@@ -642,9 +678,13 @@ button,
   gap: 0.4rem;
   flex-shrink: 0;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.storage-actions .btn-danger {
+.storage-actions .btn-danger,
+.storage-actions .btn-secondary,
+.storage-actions .button {
   padding: 0.45rem 0.75rem;
   font-size: 0.85rem;
 }
