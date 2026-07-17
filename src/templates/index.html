@@ -160,7 +160,10 @@
           <h2>2. Параметры генерации</h2>
           <p class="panel-note">
             Укажите месяц и точки. Если точки не выбраны — будут обработаны все из списка.
-            Если файл за этот период уже есть в <code>generated/</code>, приложение спросит подтверждение перед пересозданием.
+            Если в <code>data/</code> нет файла предыдущего периода — сервис предложит
+            скорректировать период по каждой точке.
+            Если файл за этот период уже есть в <code>generated/</code>, приложение спросит
+            подтверждение перед пересозданием.
           </p>
 
           <form id="generate-form">
@@ -268,6 +271,24 @@
     </div>
   </div>
 
+  <div id="period-adjust-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="period-adjust-title">
+    <div class="modal-backdrop" data-period-cancel></div>
+    <div class="modal-card modal-card-wide">
+      <h3 id="period-adjust-title">Нет файла за предыдущий период</h3>
+      <p id="period-adjust-message" class="modal-message"></p>
+      <p class="modal-note">
+        Для каждой точки можно выбрать другой период генерации.
+        Рекомендуемый период — следующий после последнего файла в <code>data/</code>.
+      </p>
+      <div id="period-adjust-rows" class="period-adjust-rows"></div>
+      <div class="modal-actions period-adjust-actions">
+        <button type="button" class="btn-secondary" data-period-cancel>Отмена</button>
+        <button type="button" class="btn-secondary" id="period-adjust-force">Всё равно продолжить</button>
+        <button type="button" class="btn-primary" id="period-adjust-ok">Продолжить с выбранными периодами</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const form = document.getElementById("generate-form");
     const submitBtn = document.getElementById("submit-btn");
@@ -285,6 +306,11 @@
       error: "ошибка",
       partial_error: "частично",
     };
+    const monthOptions = [
+      {% for num, name in months %}
+      { value: {{ num }}, label: {{ name|tojson }} },
+      {% endfor %}
+    ];
 
     function escapeHtml(value) {
       return String(value)
@@ -574,6 +600,107 @@
       });
     }
 
+    function askPeriodAdjust(detail) {
+      const modal = document.getElementById("period-adjust-modal");
+      const messageEl = document.getElementById("period-adjust-message");
+      const rowsEl = document.getElementById("period-adjust-rows");
+      const okBtn = document.getElementById("period-adjust-ok");
+      const forceBtn = document.getElementById("period-adjust-force");
+      const missing = detail.missing || [];
+
+      messageEl.textContent = detail.message || "Скорректируйте период генерации.";
+      rowsEl.innerHTML = missing
+        .map((item) => {
+          const year =
+            item.recommended_year || item.requested_year || detail.year;
+          const month =
+            item.recommended_month || item.requested_month || detail.month;
+          const latest = item.latest_data_file
+            ? `Последний файл в data/: ${item.latest_data_file}`
+            : "В data/ нет исходных файлов этой точки";
+          const prev = `Нужен файл: ${item.previous_filename}`;
+          const recMonth = monthOptions.find(
+            (m) => m.value === item.recommended_month
+          );
+          const rec =
+            item.recommended_year && item.recommended_month
+              ? `Рекомендуется: ${recMonth ? recMonth.label : item.recommended_month} ${
+                  item.recommended_year
+                }`
+              : "Рекомендация недоступна — загрузите исходный Excel";
+          const optionsHtml = monthOptions
+            .map(
+              (m) =>
+                `<option value="${m.value}"${
+                  m.value === month ? " selected" : ""
+                }>${escapeHtml(m.label)}</option>`
+            )
+            .join("");
+          return `
+            <div class="period-adjust-row" data-point="${escapeHtml(item.name)}">
+              <strong>${escapeHtml(item.name)}</strong>
+              <div class="period-adjust-meta">${escapeHtml(prev)} · ${escapeHtml(
+                latest
+              )} · ${escapeHtml(rec)}</div>
+              <div class="period-adjust-controls">
+                <label>
+                  Год
+                  <input type="number" min="2000" max="2100" class="period-year" value="${year}" />
+                </label>
+                <label>
+                  Месяц
+                  <select class="period-month">${optionsHtml}</select>
+                </label>
+              </div>
+            </div>`;
+        })
+        .join("");
+
+      modal.classList.remove("hidden");
+
+      return new Promise((resolve) => {
+        const cleanup = () => {
+          modal.classList.add("hidden");
+          okBtn.removeEventListener("click", onOk);
+          forceBtn.removeEventListener("click", onForce);
+          modal.querySelectorAll("[data-period-cancel]").forEach((el) => {
+            el.removeEventListener("click", onCancel);
+          });
+          document.removeEventListener("keydown", onKey);
+        };
+        const collectOverrides = () =>
+          Array.from(rowsEl.querySelectorAll(".period-adjust-row")).map((row) => ({
+            name: row.getAttribute("data-point"),
+            year: Number(row.querySelector(".period-year").value),
+            month: Number(row.querySelector(".period-month").value),
+          }));
+        const onOk = () => {
+          const overrides = collectOverrides();
+          cleanup();
+          resolve({ action: "adjust", overrides });
+        };
+        const onForce = () => {
+          const overrides = collectOverrides();
+          cleanup();
+          resolve({ action: "force", overrides });
+        };
+        const onCancel = () => {
+          cleanup();
+          resolve({ action: "cancel" });
+        };
+        const onKey = (event) => {
+          if (event.key === "Escape") onCancel();
+        };
+        okBtn.addEventListener("click", onOk);
+        forceBtn.addEventListener("click", onForce);
+        modal.querySelectorAll("[data-period-cancel]").forEach((el) => {
+          el.addEventListener("click", onCancel);
+        });
+        document.addEventListener("keydown", onKey);
+        okBtn.focus();
+      });
+    }
+
     document.querySelector(".storage-panel").addEventListener("click", async (event) => {
       const btn = event.target.closest("[data-delete-file]");
       if (!btn) return;
@@ -749,7 +876,12 @@
       const month = Number(document.getElementById("month").value);
       const points = selectedPoints();
 
-      const body = { year, month, force: false };
+      const body = {
+        year,
+        month,
+        force: false,
+        skip_previous_check: false,
+      };
       if (points.length) body.points = points;
 
       setLoading(true);
@@ -762,6 +894,33 @@
           body: JSON.stringify(body),
         });
         let payload = await response.json();
+
+        while (
+          response.status === 409 &&
+          payload.detail &&
+          payload.detail.code === "missing_previous"
+        ) {
+          setLoading(false);
+          const decision = await askPeriodAdjust(payload.detail);
+          if (decision.action === "cancel") {
+            results.className = "results result-card";
+            results.innerHTML =
+              `<h3>Генерация отменена</h3>` +
+              `<p>Скорректируйте период или загрузите файл предыдущего месяца в data/.</p>`;
+            results.classList.remove("hidden");
+            return;
+          }
+          body.point_overrides = decision.overrides || [];
+          body.skip_previous_check = decision.action === "force";
+          setLoading(true);
+          response = await fetch("/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          payload = await response.json();
+          if (decision.action === "force") break;
+        }
 
         if (response.status === 409 && payload.detail && payload.detail.code === "already_exists") {
           setLoading(false);

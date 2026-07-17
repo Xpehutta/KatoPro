@@ -53,6 +53,12 @@ def previous_month(year: int, month: int) -> tuple[int, int]:
     return year, month - 1
 
 
+def next_month(year: int, month: int) -> tuple[int, int]:
+    if month == 12:
+        return year + 1, 1
+    return year, month + 1
+
+
 def days_in_month(year: int, month: int) -> int:
     return calendar.monthrange(year, month)[1]
 

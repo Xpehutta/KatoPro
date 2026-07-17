@@ -32,14 +32,16 @@ from .models import (
     AddPointManualRequest,
     ExistingOutputFile,
     GenerateConflictResponse,
+    GenerateMissingPreviousResponse,
     GenerateRequest,
     GenerateResponse,
+    MissingPreviousPeriod,
     PointInfo,
     PointResult,
     UploadBatchResponse,
     UploadItemResult,
 )
-from .utils import MONTH_NAMES_RU, sheet_name_for
+from .utils import MONTH_NAMES_RU, next_month, previous_month, sheet_name_for
 
 config: AppConfig | None = None
 generator: ReportGenerator | None = None
@@ -60,6 +62,112 @@ def _period_key_from_filename(filename: str) -> int:
     """МесОтч202604_Смола.xlsx → 202604; если периода нет — 0."""
     match = PERIOD_IN_NAME_RE.match(Path(filename).name)
     return int(match.group(1)) if match else 0
+
+
+def _period_tuple_from_key(key: int) -> Optional[tuple[int, int]]:
+    if key < 200001:
+        return None
+    return key // 100, key % 100
+
+
+def _data_files_for_point(point_name: str) -> list[Path]:
+    cfg = _require_config()
+    needle = f"_{point_name}.xlsx".casefold()
+    files: list[Path] = []
+    if not cfg.data_dir.exists():
+        return files
+    for path in sorted(cfg.data_dir.glob("МесОтч*.xlsx")):
+        if path.name.casefold().endswith(needle):
+            files.append(path)
+    return files
+
+
+def _latest_data_period(point_name: str) -> tuple[Optional[Path], Optional[tuple[int, int]]]:
+    best_path: Optional[Path] = None
+    best_key = 0
+    for path in _data_files_for_point(point_name):
+        key = _period_key_from_filename(path.name)
+        if key > best_key:
+            best_key = key
+            best_path = path
+    period = _period_tuple_from_key(best_key)
+    return best_path, period
+
+
+def _has_previous_period_file(point_name: str, year: int, month: int) -> bool:
+    prev_y, prev_m = previous_month(year, month)
+    expected_key = prev_y * 100 + prev_m
+    for path in _data_files_for_point(point_name):
+        if _period_key_from_filename(path.name) == expected_key:
+            return True
+    return False
+
+
+def _effective_point_periods(
+    request: GenerateRequest,
+    targets: list,
+) -> dict[str, tuple[int, int]]:
+    periods: dict[str, tuple[int, int]] = {
+        point.name: (request.year, request.month) for point in targets
+    }
+    for override in request.point_overrides or []:
+        for point in targets:
+            if point.name.casefold() == override.name.strip().casefold():
+                periods[point.name] = (override.year, override.month)
+                break
+    return periods
+
+
+def _missing_previous_periods(
+    targets: list,
+    periods: dict[str, tuple[int, int]],
+) -> list[MissingPreviousPeriod]:
+    missing: list[MissingPreviousPeriod] = []
+    for point in targets:
+        year, month = periods[point.name]
+        if _has_previous_period_file(point.name, year, month):
+            continue
+        prev_y, prev_m = previous_month(year, month)
+        latest_path, latest_period = _latest_data_period(point.name)
+        recommended = next_month(*latest_period) if latest_period else None
+        prev_name = f"МесОтч{prev_y}{prev_m:02d}_{point.name}.xlsx"
+        if latest_period:
+            latest_label = (
+                f"{MONTH_NAMES_RU[latest_period[1]]} {latest_period[0]} "
+                f"({latest_path.name if latest_path else '—'})"
+            )
+            rec_label = (
+                f"{MONTH_NAMES_RU[recommended[1]]} {recommended[0]}"
+                if recommended
+                else "—"
+            )
+            message = (
+                f"Нет файла за предыдущий период «{MONTH_NAMES_RU[prev_m]} {prev_y}» "
+                f"({prev_name}). В data/ последний файл: {latest_label}. "
+                f"Рекомендуется генерировать: {rec_label}."
+            )
+        else:
+            message = (
+                f"Нет файла за предыдущий период «{MONTH_NAMES_RU[prev_m]} {prev_y}» "
+                f"({prev_name}), и в data/ нет исходников этой точки."
+            )
+        missing.append(
+            MissingPreviousPeriod(
+                name=point.name,
+                requested_year=year,
+                requested_month=month,
+                previous_year=prev_y,
+                previous_month=prev_m,
+                previous_filename=prev_name,
+                latest_data_file=latest_path.name if latest_path else None,
+                latest_year=latest_period[0] if latest_period else None,
+                latest_month=latest_period[1] if latest_period else None,
+                recommended_year=recommended[0] if recommended else None,
+                recommended_month=recommended[1] if recommended else None,
+                message=message,
+            )
+        )
+    return missing
 
 
 def _safe_upload_filename(original: str) -> str:
@@ -643,11 +751,16 @@ def generate(request: GenerateRequest):
     cfg = _require_config()
 
     logger.info(
-        "Запрос генерации: год={} месяц={} точки={} force={}",
+        "Запрос генерации: год={} месяц={} точки={} force={} skip_prev={} overrides={}",
         request.year,
         request.month,
         request.points,
         request.force,
+        request.skip_previous_check,
+        [
+            f"{o.name}:{o.year}-{o.month:02d}"
+            for o in (request.point_overrides or [])
+        ],
     )
 
     try:
@@ -655,10 +768,29 @@ def generate(request: GenerateRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    periods = _effective_point_periods(request, targets)
+
+    if not request.skip_previous_check:
+        missing = _missing_previous_periods(targets, periods)
+        if missing:
+            period = f"{MONTH_NAMES_RU[request.month]} {request.year}"
+            conflict = GenerateMissingPreviousResponse(
+                message=(
+                    f"Для выбранного периода «{period}» у части точек нет файла "
+                    f"предыдущего месяца в data/. Скорректируйте период генерации "
+                    f"или загрузите недостающий исходник."
+                ),
+                year=request.year,
+                month=request.month,
+                missing=missing,
+            )
+            raise HTTPException(status_code=409, detail=conflict.model_dump())
+
     existing: list[ExistingOutputFile] = []
     out_dir = Path(cfg.output_dir)
     for point in targets:
-        filename = f"МесОтч{request.year}{request.month:02d}_{point.name}.xlsx"
+        year, month = periods[point.name]
+        filename = f"МесОтч{year}{month:02d}_{point.name}.xlsx"
         path = out_dir / filename
         if path.exists():
             existing.append(
@@ -674,8 +806,9 @@ def generate(request: GenerateRequest):
         sheet = sheet_name_for(request.year, request.month)
         conflict = GenerateConflictResponse(
             message=(
-                f"За период «{period}» уже есть сгенерированные файлы "
-                f"(лист {sheet}). Подтвердите пересоздание или выберите другой период/точку."
+                f"За выбранный период уже есть сгенерированные файлы "
+                f"(например лист {sheet}). Подтвердите пересоздание или "
+                f"выберите другой период/точку."
             ),
             year=request.year,
             month=request.month,
@@ -683,8 +816,14 @@ def generate(request: GenerateRequest):
         )
         raise HTTPException(status_code=409, detail=conflict.model_dump())
 
+    point_periods = {name: value for name, value in periods.items()}
     try:
-        raw_results = generator.generate(request.year, request.month, request.points)
+        raw_results = generator.generate(
+            request.year,
+            request.month,
+            request.points,
+            point_periods=point_periods,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:

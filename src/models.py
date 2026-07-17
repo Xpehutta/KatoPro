@@ -18,6 +18,14 @@ class GenerateRequest(BaseModel):
         default=False,
         description="Перезаписать уже существующие файлы за этот период без дополнительного отказа API",
     )
+    skip_previous_check: bool = Field(
+        default=False,
+        description="Не проверять наличие файла предыдущего периода в data/",
+    )
+    point_overrides: Optional[list["PointPeriodOverride"]] = Field(
+        default=None,
+        description="Индивидуальный год/месяц генерации для отдельных точек",
+    )
 
     @field_validator("points")
     @classmethod
@@ -27,6 +35,12 @@ class GenerateRequest(BaseModel):
                 "Список точек не должен быть пустым; не передавайте поле, чтобы обработать все точки"
             )
         return value
+
+
+class PointPeriodOverride(BaseModel):
+    name: str = Field(..., min_length=1)
+    year: int = Field(..., ge=2000, le=2100)
+    month: int = Field(..., ge=1, le=12)
 
 
 class ExistingOutputFile(BaseModel):
@@ -41,6 +55,29 @@ class GenerateConflictResponse(BaseModel):
     year: int
     month: int
     existing: list[ExistingOutputFile]
+
+
+class MissingPreviousPeriod(BaseModel):
+    name: str
+    requested_year: int
+    requested_month: int
+    previous_year: int
+    previous_month: int
+    previous_filename: str
+    latest_data_file: Optional[str] = None
+    latest_year: Optional[int] = None
+    latest_month: Optional[int] = None
+    recommended_year: Optional[int] = None
+    recommended_month: Optional[int] = None
+    message: str
+
+
+class GenerateMissingPreviousResponse(BaseModel):
+    code: str = "missing_previous"
+    message: str
+    year: int
+    month: int
+    missing: list[MissingPreviousPeriod]
 
 
 class PointResult(BaseModel):

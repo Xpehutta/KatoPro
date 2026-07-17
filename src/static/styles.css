@@ -710,6 +710,63 @@ button,
   margin-top: 1.15rem;
 }
 
+.modal-card-wide {
+  width: min(640px, 94vw);
+}
+
+.period-adjust-rows {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  max-height: min(50vh, 360px);
+  overflow: auto;
+}
+
+.period-adjust-row {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.period-adjust-row strong {
+  font-size: 0.95rem;
+}
+
+.period-adjust-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.period-adjust-controls {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 0.55rem;
+}
+
+.period-adjust-controls label {
+  gap: 0.25rem;
+  font-size: 0.82rem;
+}
+
+.period-adjust-actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .period-adjust-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .period-adjust-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}
+
 
 
 input[type="text"],

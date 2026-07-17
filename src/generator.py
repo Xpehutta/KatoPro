@@ -48,12 +48,19 @@ class ReportGenerator:
         year: int,
         month: int,
         point_names: Optional[list[str]] = None,
+        point_periods: Optional[dict[str, tuple[int, int]]] = None,
     ) -> list[dict]:
         targets = self._resolve_points(point_names)
         results: list[dict] = []
         for point in targets:
+            y, m = year, month
+            if point_periods:
+                for key, value in point_periods.items():
+                    if key.casefold() == point.name.casefold():
+                        y, m = value
+                        break
             try:
-                results.append(self._generate_point(point, year, month))
+                results.append(self._generate_point(point, y, m))
             except Exception as exc:
                 logger.exception("Ошибка генерации для {}: {}", point.name, exc)
                 results.append(
