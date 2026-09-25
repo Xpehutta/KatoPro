@@ -29,8 +29,12 @@ THIN = Side(style="thin")
 THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 DATA_START_ROW = 14
-INPUT_COLS = (2, 3, 5, 6, 7)  # B C E F G
-SELLER_COLS = (10, 11, 12, 13, 14, 15)  # J–O
+# Колонки с формулами / датами — защищены (A, D, H, I)
+FORMULA_COLS = (1, 4, 8, 9)
+# Колонки для ввода продавцом — разблокированы
+INPUT_COLS = (2, 3, 5, 6, 7)  # B C E F G — выручка, возврат, карты, чеки, инкассация
+SELLER_COLS = (10, 11, 12, 13, 14, 15)  # J–O — продавцы / время
+EDITABLE_COLS = INPUT_COLS + SELLER_COLS
 
 MONEY_FMT = r'_-* #,##0.00\ _₽_-;\-* #,##0.00\ _₽_-;_-* "-"??\ _₽_-;_-@_-'
 DATE_FMT = "mm-dd-yy"
@@ -116,6 +120,8 @@ class ReportGenerator:
 
         ws = wb.copy_worksheet(template_ws)
         ws.title = new_sheet
+        # Снять защиту со копии шаблона, чтобы корректно выставить locked/unlocked
+        ws.protection.disable()
 
         all_non_working = set(self.holidays.get_month_holidays(year, month))
         # Для NETWORKDAYS нужны праздники/переносы в будни (сб/вс NETWORKDAYS исключает сам).
@@ -132,6 +138,8 @@ class ReportGenerator:
             weekday_holidays=weekday_holidays,
         )
 
+        n_days = days_in_month(year, month)
+        self._apply_area_locks(ws, n_days)
         self._protect_sheet(ws)
         wb.save(dest)
         wb.close()
@@ -451,6 +459,46 @@ class ReportGenerator:
             cell.number_format = "h:mm" if col in (11, 12) else "@"
             cell.fill = GREEN_FILL if is_off else PatternFill()
 
+    def _apply_area_locks(self, ws: Worksheet, n_days: int) -> None:
+        """
+        Явно разделить области:
+        - A, D, H, I — формулы/даты (locked);
+        - B, C, E, F, G, J–O — ввод (unlocked).
+        """
+        last_data_row = DATA_START_ROW + n_days - 1
+        sum_row = last_data_row + 1
+        stats_end = sum_row + 4
+
+        # Весь используемый блок сначала закрыть
+        for row in range(1, max(stats_end, last_data_row) + 1):
+            for col in range(1, 16):
+                ws.cell(row, col).protection = Protection(locked=True)
+
+        # Служебные формулы в шапке
+        for addr in ("A3", "D3", "E3", "G3", "I3", "B8", "B10", "I13"):
+            ws[addr].protection = Protection(locked=True)
+
+        # Дневные строки: формулы locked, ввод unlocked
+        for row in range(DATA_START_ROW, last_data_row + 1):
+            for col in FORMULA_COLS:
+                ws.cell(row, col).protection = Protection(locked=True)
+            for col in EDITABLE_COLS:
+                ws.cell(row, col).protection = Protection(locked=False)
+
+        # Итоги и статистика — только формулы
+        for col in range(1, 16):
+            ws.cell(sum_row, col).protection = Protection(locked=True)
+        for row in range(sum_row + 1, stats_end + 1):
+            for col in range(1, 16):
+                ws.cell(row, col).protection = Protection(locked=True)
+
+        logger.info(
+            "Защита областей: формулы A/D/H/I locked, ввод B/C/E/F/G/J–O unlocked "
+            "(строки {}–{})",
+            DATA_START_ROW,
+            last_data_row,
+        )
+
     def _clear_data_area(self, ws: Worksheet, start_row: int, end_row: int) -> None:
         for row in range(start_row, end_row + 1):
             for col in range(1, 16):
@@ -465,11 +513,37 @@ class ReportGenerator:
             cell.value = None
 
     def _protect_sheet(self, ws: Worksheet) -> None:
+        """
+        Включить защиту листа: формулы locked, ввод — unlocked.
+
+        В OOXML флаги select*Locked/UnlockedCells=True означают ЗАПРЕТ выбора.
+        Поэтому оставляем их False (как по умолчанию в openpyxl), иначе
+        нельзя даже кликнуть по разблокированным ячейкам — лист «весь закрыт».
+        """
         password = self.config.protection_password or None
         if password == "":
             password = None
+
+        # Сбросить возможную защиту с листа-шаблона
+        ws.protection.disable()
+
         ws.protection.sheet = True
         ws.protection.enable()
-        ws.protection.password = password
-        ws.protection.selectUnlockedCells = True
-        ws.protection.selectLockedCells = True
+        if password is not None:
+            ws.protection.password = password
+
+        # False = разрешить выбор (см. ECMA-376 sheetProtection)
+        ws.protection.selectLockedCells = False
+        ws.protection.selectUnlockedCells = False
+
+        # True = запретить действие пользователю
+        ws.protection.formatCells = True
+        ws.protection.formatColumns = True
+        ws.protection.formatRows = True
+        ws.protection.insertColumns = True
+        ws.protection.insertRows = True
+        ws.protection.deleteColumns = True
+        ws.protection.deleteRows = True
+        ws.protection.sort = True
+        ws.protection.autoFilter = True
+        ws.protection.pivotTables = True
